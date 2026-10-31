@@ -2,9 +2,37 @@ package dev.termish.term
 
 import kotlin.test.Test
 import kotlin.test.assertEquals
+import kotlin.test.assertNull
 
 /** TerminalSelection 复制语义：折行续行不插入换行、普通行间保留换行。 */
 class TerminalSelectionTest {
+    @Test
+    fun reverseMultilineSelectionUsesTheSameHighlightAndCopyBounds() {
+        val b = TerminalBuffer(5, 3)
+        TerminalEmulator(b).writeText("abcde\r\nfghij\r\nklmno")
+        val selection = TerminalSelection(b)
+        selection.start(2, 2)
+        selection.extend(0, 1)
+
+        assertEquals(1..4, selection.columnsInRow(0))
+        assertEquals(0..4, selection.columnsInRow(1))
+        assertEquals(0..2, selection.columnsInRow(2))
+        assertEquals("bcde\nfghij\nklm", selection.selectedText())
+        selection.clear()
+        assertNull(selection.columnsInRow(1))
+    }
+
+    @Test
+    fun observerReceivesStartExtendAndClear() {
+        var changes = 0
+        val selection = TerminalSelection(TerminalBuffer(5, 3)) { changes++ }
+        selection.start(0, 0)
+        selection.extend(1, 2)
+        selection.clear()
+
+        assertEquals(3, changes)
+    }
+
     @Test
     fun wrappedRowsJoinWithoutNewline() {
         val b = TerminalBuffer(5, 3)

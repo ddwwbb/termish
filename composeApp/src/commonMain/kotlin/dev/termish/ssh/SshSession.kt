@@ -94,6 +94,8 @@ data class SshConnection(
     /** PTY 终端类型（$TERM）：默认 xterm-256color（与本机渲染能力一致）；
      *  xterm / vt100 / linux 为兼容备选（服务器按 terminfo 降级能力）。 */
     val terminalType: String = "xterm-256color",
+    /** 主 PTY 通道通过 exec 启动此命令；null 表示启动登录 shell，不把命令写入 stdin。 */
+    val terminalCommand: String? = null,
 )
 
 /**
@@ -129,7 +131,7 @@ interface SshCallbacks {
  * 平台无关的 SSH 会话抽象。引擎由平台注入（JVM: sshj；iOS: libssh2/NTermish）。
  */
 interface SshSession {
-    /** 阻塞：连接 + 认证 + 打开 session 通道 + 启动 shell。 */
+    /** 阻塞：连接 + 认证 + 主 PTY；按 [SshConnection.terminalCommand] 启动命令或 shell。 */
     fun connectAndStart(
         columns: Int,
         rows: Int,

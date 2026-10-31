@@ -10,8 +10,10 @@ import dev.termish.ssh.CommandResult
 import dev.termish.ssh.HostKeyInfo
 import dev.termish.ssh.SessionInfo
 import dev.termish.ssh.SshCallbacks
+import dev.termish.ssh.SshConnection
 import dev.termish.ssh.SshExecChannel
 import dev.termish.ssh.SshSession
+import dev.termish.tmux.TmuxCommands
 import dev.termish.util.NetworkChangeKind
 import java.util.concurrent.CountDownLatch
 import java.util.concurrent.TimeUnit
@@ -334,6 +336,52 @@ class TerminalControllerTest {
         assertEquals("ubuntu", r.getHost("h1")!!.system)
         assertEquals("SHA256:test", r.getHost("h1")!!.knownHostFingerprint, "系统探测不应抹掉已记录指纹")
         c.destroy()
+    }
+
+    @Test
+    fun tmuxHostStartsOnePrimaryExecWithoutInjectingShellInput() {
+        assertTmuxPrimaryExec(host().copy(connectionMode = ConnectionMode.TMUX, tmuxSessionName = "work"))
+    }
+
+    @Test
+    fun tmuxPanelStartsOnePrimaryExecWithoutInjectingShellInput() {
+        assertTmuxPrimaryExec(host(), TerminalLaunchMode.TMUX, "panel")
+    }
+
+    private fun assertTmuxPrimaryExec(
+        host: Host,
+        launchMode: TerminalLaunchMode = TerminalLaunchMode.SHELL,
+        tmuxSessionName: String? = null,
+    ) {
+        val connections = mutableListOf<SshConnection>()
+        val transports = mutableListOf<FakeSsh>()
+        val c =
+            TerminalController(host, null, null, repo(), false, launchMode, tmuxSessionName) { connection, callbacks ->
+                connections.add(connection)
+                FakeSsh().also {
+                    it.callbacks = callbacks
+                    transports.add(it)
+                }
+            }
+        try {
+            repeat(2) {
+                c.connect(80, 24)
+                awaitStatus(c, ConnStatus.CONNECTED)
+                val name = tmuxSessionName ?: host.tmuxSessionName
+                assertEquals(TmuxCommands.attachOrCreateCmd(name), connections.last().terminalCommand)
+                // 留出旧实现延迟注入的时间，确保脚本不会再写入远端输入流。
+                Thread.sleep(300)
+                scheduler.advanceTimeBy(3_500)
+                scheduler.runCurrent()
+                assertTrue(transports.last().sent.none { it.decodeToString().contains("tmux -u new-session") })
+                c.connect(80, 24)
+                assertEquals(it + 1, connections.size, "重入健康会话不得再次建立连接")
+                c.close()
+            }
+            assertEquals(2, connections.size, "重连时每条连接仅启动一个主 PTY 命令")
+        } finally {
+            c.destroy()
+        }
     }
 
     @Test

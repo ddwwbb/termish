@@ -3,10 +3,14 @@ package dev.termish.ssh
 import java.io.File
 import java.net.InetSocketAddress
 import java.net.Socket
+import java.util.concurrent.CountDownLatch
+import java.util.concurrent.TimeUnit
 import java.util.concurrent.atomic.AtomicBoolean
 import java.util.concurrent.atomic.AtomicReference
 import kotlin.test.Test
 import kotlin.test.assertContains
+import kotlin.test.assertEquals
+import kotlin.test.assertFalse
 import kotlin.test.assertNotNull
 import kotlin.test.assertTrue
 
@@ -179,6 +183,71 @@ class SshjIntegrationTest {
             val detected = detectSystemFromOutput(raw!!)
             assertNotNull(detected, "应从探测输出识别出系统，raw=${raw.take(200)}")
             println("probe detected: $detected")
+        } finally {
+            session.close()
+        }
+    }
+
+    @Test
+    fun primaryPtyExecPreservesInputResizeControlCommandsAndExitStatus() {
+        if (!skipUnlessSshd()) return
+        val pemFile = File(env("Termish_TEST_KEY", "/tmp/termish_test/client"))
+        if (!pemFile.exists()) return
+        val output = StringBuffer()
+        val ready = CountDownLatch(1)
+        val closed = CountDownLatch(1)
+        val exitStatus = AtomicReference<Int?>(null)
+        val command =
+            "sh -c 'stty -echo; printf \"TERMISH_EXEC_READY\\n\"; " +
+                "while IFS= read -r line; do case \"\$line\" in " +
+                "size) stty size;; quit) exit 7;; *) printf \"reply:%s\\n\" \"\$line\";; esac; done'"
+        val session =
+            createSshSession(
+                SshConnection(
+                    host = "127.0.0.1",
+                    port = env("Termish_TEST_PORT", "22222").toInt(),
+                    username = checkNotNull(System.getProperty("user.name")),
+                    privateKeyPem = pemFile.readText(),
+                    terminalCommand = command,
+                ),
+                object : SshCallbacks {
+                    override suspend fun onOutput(data: ByteArray) {
+                        output.append(data.decodeToString())
+                        if (output.contains("TERMISH_EXEC_READY")) ready.countDown()
+                    }
+
+                    override suspend fun onStderr(data: ByteArray) {
+                        output.append(data.decodeToString())
+                    }
+
+                    override fun onExitStatus(status: Int) {
+                        exitStatus.set(status)
+                    }
+
+                    override fun onClosed(reason: String?) {
+                        closed.countDown()
+                    }
+
+                    override suspend fun onPrompt(prompt: AuthPrompt): List<String>? = null
+
+                    override fun verifyHostKey(hostKey: HostKeyInfo): Boolean = true
+                },
+            )
+        try {
+            session.connectAndStart(100, 40)
+            assertTrue(ready.await(10, TimeUnit.SECONDS), "主 PTY exec 应启动交互命令")
+            assertFalse(output.contains("stty -echo"), "启动脚本不得作为终端输入回显")
+            assertTrue(session.checkAlive(2_500))
+            val control = session.runCommandDetailed("printf TERMISH_EXEC_CONTROL", 5_000)
+            assertNotNull(control)
+            assertContains(control.stdout, "TERMISH_EXEC_CONTROL")
+            session.resize(72, 19, 0, 0)
+            session.sendData("size\nhello\nquit\n".encodeToByteArray())
+            assertTrue(closed.await(10, TimeUnit.SECONDS), "主 PTY exec 退出应通知会话关闭")
+            assertContains(output.toString(), "19 72")
+            assertContains(output.toString(), "reply:hello")
+            assertEquals(7, exitStatus.get())
+            assertFalse(session.isActive())
         } finally {
             session.close()
         }

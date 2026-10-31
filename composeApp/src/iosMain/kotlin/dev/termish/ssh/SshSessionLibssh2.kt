@@ -214,9 +214,15 @@ class SshSessionLibssh2(
             cleanup()
             throw SshException("PTY 请求失败")
         }
-        if (retryUntilSuccess { libssh2_channel_process_startup(ch, "shell", 5u, null, 0u) } != 0) {
+        val command = connection.terminalCommand
+        val request = if (command == null) "shell" else "exec"
+        val commandLength = command?.encodeToByteArray()?.size ?: 0
+        if (retryUntilSuccess {
+                libssh2_channel_process_startup(ch, request, request.length.toUInt(), command, commandLength.toUInt())
+            } != 0
+        ) {
             cleanup()
-            throw SshException("启动 shell 失败")
+            throw SshException("SSH $request request failed")
         }
         startReader(ch)
         val hk = hostKeyInfo

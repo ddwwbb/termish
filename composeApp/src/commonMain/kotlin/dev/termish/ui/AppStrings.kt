@@ -276,6 +276,10 @@ data class AppStrings(
     val terminalCancel: String,
     val terminalCopied: String,
     val terminalPasted: String,
+    /** 选择模式操作条（无障碍描述）。 */
+    val terminalCopy: String,
+    val terminalPaste: String,
+    val terminalSelectAll: String,
     val terminalReconnectingN: (Int) -> String,
     val terminalRestoringAfterBackgroundN: (Int) -> String,
     val terminalRestoringAfterNetworkChangeN: (Int) -> String,
@@ -306,7 +310,7 @@ data class AppStrings(
     /** Git 面板文案（终端内可视化 git 状态/diff/提交；嵌套子类缓解 JVM 255 参数上限）。 */
     val git: GitStrings,
     /** tmux 管理面板（会话列表 / 附加 / 新建 / rename / detach / kill）。 */
-    val tmux: TmuxStrings,    // 语音输入（火山引擎流式语音识别）
+    val tmux: TmuxStrings, // 语音输入（火山引擎流式语音识别）
     val voice: VoiceStrings,
     // 终端文件上传
     val upload: UploadStrings,
@@ -1436,6 +1440,9 @@ private val EnStrings =
         terminalCancel = "Cancel",
         terminalCopied = "Copied",
         terminalPasted = "Pasted",
+        terminalCopy = "Copy",
+        terminalPaste = "Paste",
+        terminalSelectAll = "Select all",
         terminalReconnectingN = { "Connection lost, reconnecting (attempt $it)…" },
         terminalRestoringAfterBackgroundN = { "Background connection expired, restoring (attempt $it)…" },
         terminalRestoringAfterNetworkChangeN = { "Network changed, restoring connection (attempt $it)…" },
@@ -2099,6 +2106,9 @@ private val ZhStrings =
         terminalCancel = "取消",
         terminalCopied = "已复制",
         terminalPasted = "已粘贴",
+        terminalCopy = "复制",
+        terminalPaste = "粘贴",
+        terminalSelectAll = "全选",
         terminalReconnectingN = { "连接中断，正在重连（第 $it 次）…" },
         terminalRestoringAfterBackgroundN = { "后台连接已失效，正在恢复（第 $it 次）…" },
         terminalRestoringAfterNetworkChangeN = { "网络已变化，正在恢复连接（第 $it 次）…" },

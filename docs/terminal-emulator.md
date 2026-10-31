@@ -148,6 +148,8 @@ OSC / OSC_ESC / DCS / DCS_ESC）。
 - 字体：JetBrains Mono（捆绑，各端度量一致）；CJK 回退（iOS 显式 PingFang SC）。
 - 光标：DECSCUSR 稳态样式（2/4/6）常亮，闪烁样式按 530ms 相位交替；块状光标下字符反色重绘。
 - 目标列数模式：按 12sp 参考测量反算字号，逐次实测校正列数（见 `effectiveFontSizeSp`）。
+- 选择高亮使用 `TerminalSelection.columnsInRow()` 的归一化范围，反向跨行拖选与复制边界一致。
+  `TerminalSelection` 通过无平台依赖的 `onChange` 回调通知 UI 控制器，开始、延伸、清除选区均触发重绘。
 
 ## 测试纪律
 

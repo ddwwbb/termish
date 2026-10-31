@@ -124,6 +124,7 @@ kotlin {
 
         androidUnitTest.dependencies {
             implementation(libs.junit)
+            implementation(libs.androidx.compose.ui.test.junit4)
             implementation(libs.multiplatform.settings.test)
             implementation(libs.robolectric)
             implementation(libs.slf4j.nop)
@@ -222,5 +223,6 @@ android {
 }
 
 dependencies {
+    debugImplementation(libs.androidx.compose.ui.test.manifest)
     debugImplementation(compose.uiTooling)
 }

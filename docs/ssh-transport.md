@@ -24,7 +24,7 @@
 
 ```kotlin
 interface SshSession {
-    fun connectAndStart(columns: Int, rows: Int): SessionInfo  // 阻塞：连接+认证+PTY+shell
+    fun connectAndStart(columns: Int, rows: Int): SessionInfo  // 阻塞：连接+认证+主 PTY
     fun resize(columns: Int, rows: Int, widthPx: Int, heightPx: Int)
     fun sendData(data: ByteArray)
     fun connectAndRun(command: String, timeoutMs: Long): CommandResult  // 一次性 exec（mosh 引导）
@@ -33,6 +33,14 @@ interface SshSession {
     fun isActive(): Boolean
 }
 ```
+
+`SshConnection.terminalCommand` 为空时启动交互式 shell；有值时，在同一个主 PTY 通道发送
+SSH `exec` 请求。两条路径共用输入、输出、窗口缩放、存活检测和退出状态处理。
+Android 使用 sshj `SessionChannel`；iOS 使用现有主 `LIBSSH2_CHANNEL`，命令长度按 UTF-8 字节数传递。
+
+SSH 下的 tmux 直连和面板附加在创建连接时指定 `terminalCommand`，每条连接只启动一次，
+连接收尾不再向 stdin 写入 tmux 脚本。普通 SSH 的用户启动命令保持原有行为；
+Mosh 引导 SSH 保持 shell 路径，Mosh 本身仍由引导参数启动 tmux。
 
 **回调契约（重要）**：`onOutput`/`onStderr`/`onPrompt` 是**挂起函数**——引擎在
 reader 协程里调用，上层可在边界做背压（`TerminalController.enqueueOutput`

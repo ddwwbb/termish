@@ -4,6 +4,7 @@ import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.gestures.Orientation
 import androidx.compose.foundation.gestures.awaitEachGesture
 import androidx.compose.foundation.gestures.awaitFirstDown
+import androidx.compose.foundation.gestures.awaitLongPressOrCancellation
 import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.gestures.drag
 import androidx.compose.foundation.gestures.rememberScrollableState
@@ -23,6 +24,7 @@ import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.graphics.toArgb
+import androidx.compose.ui.input.pointer.changedToUp
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.platform.LocalUriHandler
@@ -37,7 +39,6 @@ import dev.termish.term.CellAttr
 import dev.termish.term.DEFAULT_BG
 import dev.termish.term.DEFAULT_CURSOR
 import dev.termish.term.DEFAULT_FG
-import dev.termish.term.TerminalBuffer
 import dev.termish.term.TerminalCell
 import dev.termish.term.TerminalLine
 import dev.termish.term.TerminalPalette
@@ -170,15 +171,6 @@ private class LineTextCache(
     }
 }
 
-private fun currentStartAbs(
-    buffer: TerminalBuffer,
-    scrollOffset: Int,
-): Int {
-    val scrollback = buffer.scrollbackSize()
-    val offset = scrollOffset.coerceIn(0, scrollback)
-    return (buffer.totalLines() - buffer.rows - offset).coerceAtLeast(0)
-}
-
 /** OSC 8 链接可打开的协议白名单：只放开常规 Web/邮件，避免远端内容触发 file://、intent:// 等。 */
 private fun isSafeLinkScheme(url: String): Boolean {
     val scheme = url.substringBefore(':', "").lowercase()
@@ -195,6 +187,8 @@ fun TerminalView(
     coveredBottomPx: Float = 0f,
     /** 软键盘是否弹出：仅在键盘弹出时向上平移画布，避免工具栏常驻把顶部（如 herdr 的 switch 菜单）顶出屏幕。 */
     keyboardVisible: Boolean = false,
+    /** 普通轻点请求键盘；选择、拖动和链接点击保留各自的手势语义。 */
+    onRequestKeyboard: () -> Unit = {},
     /** 首次量到真实画布尺寸后回调（用于以真实行列建连，避免先以 80x24 起 PTY）。 */
     onReady: (cols: Int, rows: Int) -> Unit = { _, _ -> },
     /**
@@ -203,14 +197,15 @@ fun TerminalView(
      * 生效）会以错误行数起 PTY / resize，TUI（herdr）跟着整体重排跳动。
      */
     sizeStable: Boolean = true,
-    onCopy: (String) -> Unit,
     modifier: Modifier = Modifier,
 ) {
     val textMeasurer = rememberTextMeasurer()
 
-    var scrollOffset by remember { mutableStateOf(0) }
     // 滚动小数累加器（按行换算）
     var scrollAccum by remember { mutableFloatStateOf(0f) }
+    var selectionDragPosition by remember(controller) { mutableStateOf<Offset?>(null) }
+    // 保留到本次触摸全部释放，避免本地长按松手后又补发远端鼠标点击。
+    var selectionOwnsGesture by remember(controller) { mutableStateOf(false) }
     // 首次量到有效画布尺寸后置位（用真实行列建连）
     var readySent by remember { mutableStateOf(false) }
     var canvasSize by remember { mutableStateOf(IntSize.Zero) }
@@ -270,6 +265,7 @@ fun TerminalView(
     // rememberUpdatedState 返回的 State 实例稳定，旧闭包读取到的仍是实时值。
     val currentCellW by rememberUpdatedState(cellW)
     val currentCellH by rememberUpdatedState(cellH)
+    val currentOnRequestKeyboard by rememberUpdatedState(onRequestKeyboard)
 
     // 按 (ARGB, bold, 窄/宽字体) 缓存 TextStyle，避免每帧每个 run 都 style.copy
     val textStyleCache = remember(style, wideStyle) { HashMap<Long, TextStyle>() }
@@ -387,6 +383,31 @@ fun TerminalView(
         ((pos.x / currentCellW).toInt().coerceIn(0, buffer.cols - 1)) to
             ((pos.y / currentCellH).toInt().coerceIn(0, buffer.rows - 1))
 
+    fun extendSelectionAt(pos: Offset) {
+        val (col, row) = pointerCell(pos)
+        controller.selection.extend(controller.viewportStartRow + row, col)
+    }
+
+    // 手指停在边缘时也持续滚动，不依赖新的 MOVE 事件。
+    LaunchedEffect(controller, selectionDragPosition != null) {
+        if (selectionDragPosition == null) return@LaunchedEffect
+        while (true) {
+            val pos = selectionDragPosition ?: break
+            val edge = currentCellH * 1.5f
+            val nextOffset =
+                when {
+                    pos.y < edge -> controller.scrollOffset + 1
+                    pos.y > latestCanvasSize.height - edge -> controller.scrollOffset - 1
+                    else -> controller.scrollOffset
+                }.coerceIn(0, buffer.scrollbackSize())
+            if (nextOffset != controller.scrollOffset) {
+                controller.scrollOffset = nextOffset
+                extendSelectionAt(pos)
+            }
+            delay(50)
+        }
+    }
+
     // 内容不足一屏时的填充空行：共享同一实例（只读），保证行缓存键稳定，
     // 避免每帧新建实例产生的缓存垃圾
     val emptyLine = remember(buffer.cols) { TerminalLine(buffer.cols) }
@@ -409,16 +430,16 @@ fun TerminalView(
             // 软键盘弹出且光标被键盘区域遮住时向上平移，保证光标可见（不改变 PTY
             // 尺寸，避免全屏程序随键盘弹收反复重排）。工具栏/导航条常驻不平移；
             // 用户回看滚动时不平移。平移计算放在 graphicsLayer 块内：frame（输出）
-            // 与 scrollOffset 的变化只触发 layer 更新，不再重组整个 TerminalView。
+            // 与 controller.scrollOffset 的变化只触发 layer 更新，不再重组整个 TerminalView。
             .graphicsLayer {
                 @Suppress("UNUSED_VARIABLE")
                 val redraw = controller.frame
                 val panUp =
-                    if (!keyboardVisible || scrollOffset != 0 || size.height <= 0 || coveredBottomPx <= 0f) {
+                    if (!keyboardVisible || controller.scrollOffset != 0 || size.height <= 0 || coveredBottomPx <= 0f) {
                         0f
                     } else {
                         val cursorBottomY =
-                            (buffer.absCursorRow() - currentStartAbs(buffer, scrollOffset) + 1) * cellH
+                            (buffer.absCursorRow() - controller.viewportStartRow + 1) * cellH
                         val visibleBottomY = size.height - coveredBottomPx
                         if (cursorBottomY > visibleBottomY) {
                             (cursorBottomY - visibleBottomY).coerceAtMost(size.height)
@@ -445,7 +466,7 @@ fun TerminalView(
                     // 在上个手势块返回后立即重入本块（循环里先调 block 再等 all-up），
                     // 若先 cancel，刚启动的惯性会在同一帧被掐死（拖多少是多少）。
                     inertiaJob?.cancel()
-                    if (buffer.mouseTracking <= 0) return@awaitEachGesture
+                    if (buffer.mouseTracking <= 0 || selectionOwnsGesture) return@awaitEachGesture
                     down.consume()
                     val downId = down.id
                     val downCell = pointerCell(down.position)
@@ -481,6 +502,7 @@ fun TerminalView(
                     var multiTouch = false
                     while (true) {
                         val event = awaitPointerEvent()
+                        if (selectionOwnsGesture) break
                         // 第二根手指参与 → 切换为鼠标拖拽语义
                         if (event.changes.count { it.pressed } > 1) multiTouch = true
                         val change = event.changes.firstOrNull { it.id == downId } ?: continue
@@ -497,6 +519,7 @@ fun TerminalView(
                                 val (uc, ur) = pointerCell(down.position)
                                 sendMouseEvent(0, uc, ur, release = false)
                                 sendMouseEvent(0, uc, ur, release = true)
+                                currentOnRequestKeyboard()
                             } else {
                                 // 纵向滚轮手势：按手指抬起速度补惯性滚轮（衰减），
                                 // 方向与滑动一致，落点固定在手最后位置（钳到第 1 行起）
@@ -599,31 +622,32 @@ fun TerminalView(
             }.pointerInput(Unit) {
                 detectTapGestures(
                     onTap = tap@{ pos ->
+                        if (controller.selection.isActive) {
+                            controller.selection.clear()
+                            return@tap
+                        }
                         // TUI 鼠标模式：点击事件由上面的鼠标 handler 全权上报，本地不拦截
                         if (buffer.mouseTracking > 0) return@tap
-                        val startAbsNow = currentStartAbs(buffer, scrollOffset)
+                        val startAbsNow = controller.viewportStartRow
                         val col = (pos.x / currentCellW).toInt().coerceIn(0, buffer.cols - 1)
                         val row = (pos.y / currentCellH).toInt().coerceIn(0, buffer.rows - 1)
                         val absRow = startAbsNow + row
-                        var opened = false
                         if (absRow in 0 until buffer.totalLines()) {
                             val link = buffer.absLine(absRow).cells[col].link
                             if (link != null && isSafeLinkScheme(link)) {
                                 uriHandler.openUri(link)
-                                opened = true
+                                return@tap
                             }
                         }
-                        // 点空白处收起选区
-                        if (!opened && controller.selection.isActive) {
-                            controller.selection.clear()
-                        }
+                        currentOnRequestKeyboard()
                     },
                     onDoubleTap = tap@{ pos ->
                         // TUI 鼠标模式（herdr/vim 等）：选区由远端自己管理，
                         // 本地双击选词会与远端选区冲突，且长按/慢滑误触会整行复制
                         if (buffer.mouseTracking > 0) return@tap
-                        // 双击选词并复制
-                        val startAbsNow = currentStartAbs(buffer, scrollOffset)
+                        // 双击选词：进入选择模式（起点=词首，焦点=词尾），不立即复制——
+                        // 交给浮动操作条确认
+                        val startAbsNow = controller.viewportStartRow
                         val col = (pos.x / currentCellW).toInt().coerceIn(0, buffer.cols - 1)
                         val row = (pos.y / currentCellH).toInt().coerceIn(0, buffer.rows - 1)
                         val absRow = startAbsNow + row
@@ -643,31 +667,16 @@ fun TerminalView(
                                 while (e < buffer.cols - 1 && isWordCell(e + 1)) e++
                                 controller.selection.start(absRow, s)
                                 controller.selection.extend(absRow, e)
-                                val text = controller.selection.selectedText()
-                                if (text.isNotEmpty()) onCopy(text)
                             }
-                        }
-                    },
-                    onLongPress = longPress@{ pos ->
-                        // 同上：鼠标模式下本地长按选词禁用（用户长按后滑动会误触整行复制）
-                        if (buffer.mouseTracking > 0) return@longPress
-                        val startAbsNow = currentStartAbs(buffer, scrollOffset)
-                        val col = (pos.x / currentCellW).toInt().coerceIn(0, buffer.cols - 1)
-                        val row = (pos.y / currentCellH).toInt().coerceIn(0, buffer.rows - 1)
-                        val absRow = startAbsNow + row
-                        controller.selection.start(absRow, col)
-                        controller.selection.extend(absRow, buffer.cols - 1)
-                        val text = controller.selection.selectedText()
-                        if (text.isNotEmpty()) {
-                            onCopy(text)
                         }
                     },
                 )
             }
             // 滚动回看：scrollable 自带 fling 惯性衰减；
-            // delta 为手指拖动方向（下滑 delta>0 → 内容跟手下移 → 看历史 → scrollOffset 增大）
+            // delta 为手指拖动方向（下滑 delta>0 → 内容跟手下移 → 看历史 → controller.scrollOffset 增大）
             .scrollable(
                 orientation = Orientation.Vertical,
+                enabled = selectionDragPosition == null,
                 state =
                     rememberScrollableState { delta ->
                         // TUI 鼠标模式：手势由上面的鼠标 handler 全权处理（避免拖拽既发
@@ -690,12 +699,42 @@ fun TerminalView(
                         scrollAccum += delta
                         val rows = (scrollAccum / cellH).toInt()
                         if (rows != 0) {
-                            scrollOffset = (scrollOffset + rows).coerceIn(0, buffer.scrollbackSize())
+                            controller.scrollOffset = (controller.scrollOffset + rows).coerceIn(0, buffer.scrollbackSize())
                             scrollAccum -= rows * cellH
                         }
                         delta
                     },
             )
+            // 按下、等待长按、拖动、释放属于同一手势，避免在长按触发前提前退出。
+            .pointerInput(controller) {
+                awaitEachGesture {
+                    val down = awaitFirstDown(requireUnconsumed = false)
+                    selectionOwnsGesture = controller.selection.isActive
+                    val longPress = awaitLongPressOrCancellation(down.id) ?: return@awaitEachGesture
+                    selectionOwnsGesture = true
+                    val pos = longPress.position
+                    val (pressedCol, row) = pointerCell(pos)
+                    val absRow = controller.viewportStartRow + row
+                    val line = buffer.absLine(absRow)
+                    val col = if (line.cells[pressedCol].isWideTail) (pressedCol - 1).coerceAtLeast(0) else pressedCol
+                    controller.selection.start(absRow, col)
+                    controller.selection.extend(absRow, col + line.cells[col].width - 1)
+                    selectionDragPosition = pos
+                    try {
+                        if (drag(longPress.id) { change ->
+                                change.consume()
+                                selectionDragPosition = change.position
+                                extendSelectionAt(change.position)
+                            }
+                        ) {
+                            // 无位移的长按也消费抬起，避免随后被 onTap 清空选区。
+                            currentEvent.changes.forEach { if (it.changedToUp()) it.consume() }
+                        }
+                    } finally {
+                        selectionDragPosition = null
+                    }
+                }
+            }
             // 滚动条拖动：仅右边缘命中时消费事件，其余交给 scrollable。
             // 鼠标模式下让位（TUI 的 UI 元素可能在右边缘，如 herdr 的 tab 按钮）；
             // 默认 requireUnconsumed=true：上游鼠标处理已消费的事件不再触发。
@@ -713,7 +752,7 @@ fun TerminalView(
                                 val trackH = h.toFloat()
                                 val thumbH = (buffer.rows / total * trackH).coerceAtLeast(24f)
                                 val ratio = (change.position.y / (trackH - thumbH)).coerceIn(0f, 1f)
-                                scrollOffset = (ratio * sb).toInt().coerceIn(0, sb)
+                                controller.scrollOffset = (ratio * sb).toInt().coerceIn(0, sb)
                             }
                             change.consume()
                         }
@@ -727,7 +766,7 @@ fun TerminalView(
 
         // 每次绘制都基于最新 buffer/滚动位置计算可视区
         val scrollback = buffer.scrollbackSize()
-        val offset = scrollOffset.coerceIn(0, scrollback)
+        val offset = controller.scrollOffset.coerceIn(0, scrollback)
         val totalLines = buffer.totalLines()
         val startAbs = (totalLines - buffer.rows - offset).coerceAtLeast(0)
 
@@ -854,26 +893,12 @@ fun TerminalView(
             for (abs in selTop..selBottom) {
                 val r = abs - startAbs
                 if (r !in 0 until buffer.rows) continue
-                val fromCol =
-                    if (abs == sel.startRow && abs == sel.endRow) {
-                        minOf(sel.startCol, sel.endCol)
-                    } else if (abs == sel.startRow) {
-                        sel.startCol
-                    } else if (abs == sel.endRow) {
-                        sel.endCol
-                    } else {
-                        -1
-                    }
-                if (fromCol == -1) {
-                    drawRect(theme.selection(), Offset(0f, r * cellH), Size(buffer.cols * cellW, cellH))
-                } else {
-                    val toCol = if (abs == sel.endRow) maxOf(sel.startCol, sel.endCol) else buffer.cols - 1
-                    drawRect(
-                        theme.selection(),
-                        Offset(fromCol * cellW, r * cellH),
-                        Size((toCol - fromCol + 1) * cellW, cellH),
-                    )
-                }
+                val columns = sel.columnsInRow(abs) ?: continue
+                drawRect(
+                    theme.selection(),
+                    Offset(columns.first * cellW, r * cellH),
+                    Size(columns.count() * cellW, cellH),
+                )
             }
         }
 

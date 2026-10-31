@@ -16,6 +16,7 @@ enum class HostAuthMethod {
 enum class ConnectionMode {
     SSH,
     MOSH,
+
     /** tmux 直连：SSH 传输 + PTY exec `tmux -u new-session -A -s <会话名>`，不经登录 shell。 */
     TMUX,
 }

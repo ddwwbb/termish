@@ -846,7 +846,6 @@ private fun TerminalBody(
             TerminalBackTarget.CLOSE_SNIPPETS -> snippetOpen = false
             TerminalBackTarget.CLEAR_SELECTION -> {
                 controller.selection.clear()
-                controller.frame++
             }
             TerminalBackTarget.EXIT -> onBack()
         }
@@ -970,6 +969,7 @@ private fun TerminalBody(
                             targetCols = settings.terminalTargetCols,
                             coveredBottomPx = coveredBottomPx,
                             keyboardVisible = imeVisible,
+                            onRequestKeyboard = showKeyboard,
                             onReady = { cols, rows ->
                                 // 等工具栏高度量到后（sizeStable）建连：画布尺寸已扣除工具栏区域，
                                 // 避免先用"含被盖住区域"的错误行数起 PTY
@@ -981,10 +981,6 @@ private fun TerminalBody(
                             // 首帧工具栏未量到时画布偏高是中间尺寸：跳过 resize/onReady，
                             // 避免错误行数起 PTY 后再 resize（TUI 整体重排跳动）
                             sizeStable = toolbarBaseHeightPx > 0f,
-                            onCopy = { text ->
-                                clipboard.setText(AnnotatedString(text))
-                                scope.launch { snackbar.showSnackbar(s.terminalCopied) }
-                            },
                             modifier =
                                 Modifier
                                     .fillMaxSize()
@@ -1002,6 +998,39 @@ private fun TerminalBody(
                                     ),
                         )
                     }
+                }
+
+                // 选择模式浮动操作条：长按/双击进入选择模式后悬浮在画布顶部。
+                // 复制 = 取选区文本进剪贴板；粘贴 = 剪贴板经 bracketed paste 发送；
+                // 全选 = 屏幕全部可见行；取消 = 收起选区退出选择模式。
+                if (controller.selectionActive && controller.status == ConnStatus.CONNECTED) {
+                    SelectionActionBar(
+                        modifier = Modifier.align(Alignment.TopCenter).padding(top = Spacing.Sm),
+                        onCopy = {
+                            val text = controller.selection.selectedText()
+                            if (text.isNotEmpty()) {
+                                clipboard.setText(AnnotatedString(text))
+                                scope.launch { snackbar.showSnackbar(s.terminalCopied) }
+                            }
+                            controller.selection.clear()
+                        },
+                        onPaste = {
+                            val text = clipboard.getText()?.text
+                            if (!text.isNullOrEmpty()) {
+                                val payload =
+                                    if (controller.buffer.bracketedPaste) {
+                                        "\u001b[200~$text\u001b[201~"
+                                    } else {
+                                        text
+                                    }
+                                controller.sendText(payload)
+                                scope.launch { snackbar.showSnackbar(s.terminalPasted) }
+                            }
+                            controller.selection.clear()
+                        },
+                        onSelectAll = controller::selectVisibleText,
+                        onCancel = controller.selection::clear,
+                    )
                 }
 
                 // 连接中：可见画布内居中指示器（首连/重连共用），淡入淡出——连接完成
@@ -1129,7 +1158,6 @@ private fun TerminalBody(
                                                         TerminalGitCommandRunner(controller).fetchWorkdir()
                                                     }.getOrNull()
                                                 controller.selection.clear()
-                                                controller.frame++
                                                 terminalAgentLaunchContext(
                                                     selected,
                                                     wd,
@@ -1237,7 +1265,7 @@ private fun TerminalBody(
                 // 录音/识别中 = 同位置红按钮 + 浮层（转写/声波/计时），整组可拖动
                 // （向上拖到顶、不进入工具栏）。两态同位，点击后原地切换不跳动。
                 // 屏幕全屏（pipFullscreen）时隐藏，避免盖住远程画面。
-                if (!pipFullscreen && voiceState == VoiceUiState.IDLE) {
+                if (settings.voiceInputEnabled && !pipFullscreen && voiceState == VoiceUiState.IDLE) {
                     var startSize by remember { mutableStateOf(IntSize.Zero) }
                     val density = LocalDensity.current
                     Box(

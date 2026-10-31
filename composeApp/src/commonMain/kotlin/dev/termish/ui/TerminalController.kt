@@ -117,7 +117,25 @@ class TerminalController(
     internal val launchTmux: Boolean get() = launchMode == TerminalLaunchMode.TMUX && !tmuxSessionName.isNullOrBlank()
     val buffer = TerminalBuffer(80, 24, maxScrollbackLines = 10_000)
     val emulator = TerminalEmulator(buffer)
-    val selection = TerminalSelection(buffer)
+    var selectionActive by mutableStateOf(false)
+        private set
+    val selection = TerminalSelection(buffer, ::onSelectionChanged)
+
+    /** 回看位置属于会话，全选与画布始终使用同一个视口。 */
+    internal var scrollOffset by mutableStateOf(0)
+    internal val viewportStartRow: Int
+        get() = (buffer.totalLines() - buffer.rows - scrollOffset.coerceIn(0, buffer.scrollbackSize())).coerceAtLeast(0)
+
+    internal fun selectVisibleText() {
+        val start = viewportStartRow
+        selection.start(start, 0)
+        selection.extend(minOf(start + buffer.rows, buffer.totalLines()) - 1, buffer.cols - 1)
+    }
+
+    private fun onSelectionChanged() {
+        selectionActive = selection.isActive
+        frame++
+    }
 
     var status by mutableStateOf(ConnStatus.IDLE)
         internal set

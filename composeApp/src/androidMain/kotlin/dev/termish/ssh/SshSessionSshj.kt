@@ -16,7 +16,6 @@ import net.schmizz.sshj.common.Buffer
 import net.schmizz.sshj.common.DisconnectReason
 import net.schmizz.sshj.common.KeyType
 import net.schmizz.sshj.connection.ConnectionException
-import net.schmizz.sshj.connection.channel.AbstractChannel
 import net.schmizz.sshj.connection.channel.direct.Session
 import net.schmizz.sshj.connection.channel.direct.SessionChannel
 import net.schmizz.sshj.transport.DisconnectListener
@@ -45,7 +44,7 @@ class SshSessionSshj(
 ) : SshSession {
     private val client = SSHClient()
     private var session: Session? = null
-    private var shell: Session.Shell? = null
+    private var terminal: SessionChannel? = null
 
     private val scope = CoroutineScope(Dispatchers.IO + SupervisorJob())
 
@@ -71,14 +70,15 @@ class SshSessionSshj(
         rows: Int,
     ): SessionInfo {
         connectTransport()
-        val s = client.startSession()
+        val s = client.startSession() as SessionChannel
         session = s
         s.allocatePTY(connection.terminalType, columns, rows, 0, 0, emptyMap())
-        val sh = s.startShell()
-        shell = sh
-        callbacks.onTraceStep("shell")
+        val command = connection.terminalCommand
+        if (command == null) s.startShell() else s.exec(command)
+        terminal = s
+        callbacks.onTraceStep(if (command == null) "shell" else "exec")
 
-        startReaders(sh)
+        startReaders(s)
         return SessionInfo(
             serverVersion = serverVersion,
             hostKey = hostKeyInfo,
@@ -521,11 +521,11 @@ class SshSessionSshj(
 
     // ---------- 数据收发 ----------
 
-    private fun startReaders(sh: Session.Shell) {
+    private fun startReaders(channel: SessionChannel) {
         scope.launch(readerDispatcher) {
             try {
                 val buf = ByteArray(64 * 1024)
-                val input = sh.inputStream
+                val input = channel.inputStream
                 while (true) {
                     val n = input.read(buf)
                     if (n < 0) break
@@ -536,7 +536,7 @@ class SshSessionSshj(
         }
         scope.launch(readerDispatcher) {
             try {
-                val err = sh.errorStream ?: return@launch
+                val err = channel.errorStream ?: return@launch
                 val buf = ByteArray(64 * 1024)
                 while (true) {
                     val n = err.read(buf)
@@ -549,10 +549,10 @@ class SshSessionSshj(
         scope.launch(readerDispatcher) {
             // 等待通道关闭，报告退出状态
             try {
-                (sh as? AbstractChannel)?.join()
+                channel.join()
             } catch (_: Exception) {
                 // 通道可能以断开结束
-                while ((sh as? AbstractChannel)?.isOpen == true) delay(50)
+                while (channel.isOpen) delay(50)
             }
             handleClosed()
         }
@@ -561,7 +561,7 @@ class SshSessionSshj(
     private fun handleClosed() {
         if (!closed.compareAndSet(false, true)) return
         try {
-            val sc = shell as? SessionChannel
+            val sc = terminal
             if (sc != null) {
                 // 通道关闭后退出状态可能稍后到达，短暂轮询
                 var status: Int? = null
@@ -585,7 +585,7 @@ class SshSessionSshj(
     ) {
         scope.launch(writeDispatcher) {
             try {
-                shell?.changeWindowDimensions(columns, rows, widthPx, heightPx)
+                terminal?.changeWindowDimensions(columns, rows, widthPx, heightPx)
             } catch (_: Exception) {
             }
         }
@@ -594,8 +594,8 @@ class SshSessionSshj(
     override fun sendData(data: ByteArray) {
         scope.launch(writeDispatcher) {
             try {
-                shell?.outputStream?.write(data)
-                shell?.outputStream?.flush()
+                terminal?.outputStream?.write(data)
+                terminal?.outputStream?.flush()
             } catch (_: Exception) {
             }
         }
@@ -604,7 +604,7 @@ class SshSessionSshj(
     override fun close() {
         scope.launch(writeDispatcher) {
             try {
-                shell?.close()
+                terminal?.close()
             } catch (_: Exception) {
             }
             try {
@@ -652,7 +652,7 @@ class SshSessionSshj(
             client.isConnected &&
             client.isAuthenticated &&
             client.transport.isRunning &&
-            shell?.isOpen == true
+            terminal?.isOpen == true
 
     // ---------- 指纹 ----------
 

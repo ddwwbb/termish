@@ -216,8 +216,10 @@ class SessionManager(
         // tmux 会话：同主机 + 同会话名的活跃条目直接复用（附加到同一远端 tmux，
         // 缓冲保留）；主机连接方式 = TMUX（tmux 直连）同样按主机复用单会话；
         // 普通会话每次新建（Termius 风格多会话）。
-        if (launchMode == TerminalLaunchMode.TMUX && !tmuxSessionName.isNullOrBlank() ||
-            launchMode == TerminalLaunchMode.SHELL && host.connectionMode == ConnectionMode.TMUX
+        if (launchMode == TerminalLaunchMode.TMUX &&
+            !tmuxSessionName.isNullOrBlank() ||
+            launchMode == TerminalLaunchMode.SHELL &&
+            host.connectionMode == ConnectionMode.TMUX
         ) {
             sessions
                 .firstOrNull {

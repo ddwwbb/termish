@@ -5,6 +5,7 @@ package dev.termish.term
  */
 class TerminalSelection(
     private val buffer: TerminalBuffer,
+    private val onChange: () -> Unit = {},
 ) {
     var startRow = 0
         private set
@@ -27,30 +28,38 @@ class TerminalSelection(
         endRow = row
         endCol = col
         isActive = true
+        onChange()
     }
 
     fun extend(
         row: Int,
         col: Int,
     ) {
+        if (endRow == row && endCol == col) return
         endRow = row
         endCol = col
+        onChange()
     }
 
     fun clear() {
+        if (!isActive) return
         isActive = false
+        onChange()
     }
 
     fun contains(
         row: Int,
         col: Int,
-    ): Boolean {
-        if (!isActive) return false
+    ): Boolean = columnsInRow(row)?.contains(col) == true
+
+    /** 与复制共用归一化边界，正向、反向跨行拖选使用相同的高亮范围。 */
+    fun columnsInRow(row: Int): IntRange? {
+        if (!isActive) return null
         val (r1, c1, r2, c2) = normalized()
-        if (row < r1 || row > r2) return false
+        if (row < r1 || row > r2) return null
         val from = if (row == r1) c1 else 0
         val to = if (row == r2) c2 else buffer.cols - 1
-        return col in from..to
+        return from..to
     }
 
     private fun normalized(): SelectionBounds =

@@ -2,6 +2,7 @@
 agp = "8.9.2"
 kotlin = "2.1.21"
 composeMultiplatform = "1.8.1"
+androidx-compose-test = "1.8.1"
 androidx-activityCompose = "1.10.1"
 androidx-documentfile = "1.0.1"
 androidx-lifecycle = "2.9.0"
@@ -25,6 +26,8 @@ slf4j = "2.0.17"
 bouncycastle = "1.80.2"
 
 [libraries]
+androidx-compose-ui-test-junit4 = { module = "androidx.compose.ui:ui-test-junit4", version.ref = "androidx-compose-test" }
+androidx-compose-ui-test-manifest = { module = "androidx.compose.ui:ui-test-manifest", version.ref = "androidx-compose-test" }
 kotlinx-coroutines-core = { module = "org.jetbrains.kotlinx:kotlinx-coroutines-core", version.ref = "kotlinx-coroutines" }
 kotlinx-coroutines-test = { module = "org.jetbrains.kotlinx:kotlinx-coroutines-test", version.ref = "kotlinx-coroutines-test" }
 kotlinx-serialization-json = { module = "org.jetbrains.kotlinx:kotlinx-serialization-json", version.ref = "kotlinx-serialization" }

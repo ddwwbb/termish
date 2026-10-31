@@ -128,7 +128,7 @@ internal class SessionConnector(
         connect(c.lastCols, c.lastRows)
     }
 
-    private fun newConnection(): SshConnection {
+    private fun newConnection(terminalCommand: String? = null): SshConnection {
         val settings = c.repository.loadSettings()
         return SshConnection(
             host = c.host.hostname,
@@ -138,10 +138,23 @@ internal class SessionConnector(
             privateKeyPem = c.privateKeyPem,
             keepAliveSeconds = settings.keepaliveSeconds,
             terminalType = settings.terminalType,
+            terminalCommand = terminalCommand,
             // 重连场景网络多半已断：TCP 超时从 15s 缩短到 5s——
             // 否则 3 次重连 × 15s ≈ 1 分钟「连接中」（用户感知卡死）
             connectTimeoutMillis = if (c.reconnectAttempts > 0) 5_000 else 15_000,
         )
+    }
+
+    private fun tmuxLaunchCommand(): String? {
+        val name =
+            when {
+                c.launchHerdr -> return null
+                c.launchTmux -> c.tmuxSessionName!!
+                c.host.connectionMode == ConnectionMode.TMUX ->
+                    c.host.tmuxSessionName.ifBlank { TmuxCommands.defaultSessionName(c.host.name) }
+                else -> return null
+            }
+        return TmuxCommands.attachOrCreateCmd(name)
     }
 
     private fun isCurrentGeneration(generation: Int): Boolean = c.connectionGeneration == generation && c.status != ConnStatus.CLOSED
@@ -185,12 +198,11 @@ internal class SessionConnector(
                         doConnectMosh(generation = generation)
                         return@launch
                     }
-                    // tmux 直连：与 SSH 同一条传输路径（登录 shell 起来后经静默+
-                    // 清屏注入 tmux 命令）；远端缺 tmux 时命令回落登录壳并显示错误。
-                    // 走 SSH 路径后由 finishConnected 的 TMUX 分支注入。
+                    // tmux 与 SSH 共用传输；主 PTY 直接 exec tmux 引导命令。
                     ConnectionMode.TMUX, ConnectionMode.SSH -> {}
                 }
-                val s = c.sessionFactory(newConnection(), c.callbacks(trace, generation))
+                val terminalCommand = tmuxLaunchCommand()
+                val s = c.sessionFactory(newConnection(terminalCommand), c.callbacks(trace, generation))
                 if (!isCurrentGeneration(generation)) {
                     closeStaleSession(s)
                     return@launch
@@ -225,14 +237,8 @@ internal class SessionConnector(
                     c.herdrBin = probed.bin
                     TermLog.i("herdr") { "herdr probe ok ${c.host.name} bin=${probed.bin}" }
                 }
-                // tmux 直连（主机连接方式 = TMUX）：登录 shell 已起（connectAndStart），
-                // 经静默+清屏注入 tmux 命令（与 herdr 注入同机制，防 MOTD 竞态）。
-                // 会话名优先取主机配置，空则按主机名派生。
-                if (c.host.connectionMode == ConnectionMode.TMUX && !c.launchTmux) {
-                    val name = c.host.tmuxSessionName.ifBlank { TmuxCommands.defaultSessionName(c.host.name) }
-                    sendTmuxLaunch(s, TmuxCommands.attachOrCreateCmd(name))
-                }
-                finishConnected(s, generation)
+                // PTY exec 已启动的 tmux 不再向 stdin 注入启动脚本。
+                finishConnected(s, generation, sendStartup = terminalCommand == null)
             } catch (e: kotlinx.coroutines.CancellationException) {
                 throw e // 协程取消不是连接失败：不置 ERROR、不停保活
             } catch (e: Exception) {
@@ -863,10 +869,9 @@ internal class SessionConnector(
                 }
             }
         }
-        // 启动入口：Herdr 会话优先（herdr 即入口，探测拿到的完整路径）；
-        // tmux 会话走静默+清屏注入（防 MOTD 竞态）；主机连接方式 = TMUX 时
-        // 按主机配置的会话名（空则派生）注入；否则主机启动命令
-        // （如 tmux new -A -s main，实现会话现场恢复）
+        // SSH tmux 已由主 PTY exec 启动，调用方会关闭 sendStartup。
+        // 下方 tmux 注入仅兼容 Mosh 降级后已经打开的引导 shell；
+        // Herdr 和普通 SSH 的用户启动命令保持原有入口。
         if (sendStartup) {
             when {
                 c.launchHerdr -> sendHerdrLaunch(s)
@@ -936,9 +941,8 @@ internal class SessionConnector(
     }
 
     /**
-     * 经 shell 注入 tmux 附加/新建命令（SSH 路径；Mosh 路径由引导参数 `-- sh -c '…'`
-     * 直接 exec，无 MOTD 竞态）。复用 herdr 的静默+清屏注入机制：
-     * 等 MOTD 打完、清屏后再注入，tmux 起始画面干净。
+     * 兼容 Mosh 降级后已经打开的 SSH 引导 shell。正常 SSH tmux 连接
+     * 由 terminalCommand 直接 exec，Mosh 则由引导参数启动，均不经过这里。
      */
     private fun sendTmuxLaunch(
         s: SshSession,
@@ -1053,8 +1057,10 @@ internal class SessionConnector(
         // 会查询终端主题，注入才安全有效。
         if (!c.host.moshThemeSync ||
             (
-                !c.launchHerdr && !c.launchTmux &&
-                    c.host.connectionMode != ConnectionMode.TMUX && c.host.startupCommand.isBlank()
+                !c.launchHerdr &&
+                    !c.launchTmux &&
+                    c.host.connectionMode != ConnectionMode.TMUX &&
+                    c.host.startupCommand.isBlank()
             )
         ) {
             return
