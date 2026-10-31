@@ -220,12 +220,14 @@ class HostRepository(
 
     // ---------- 最近会话（连接页列表持久化） ----------
 
-    /** 最近终端会话：主机 + 会话启动类型；Herdr 不再写入主机配置。 */
+    /** 最近终端会话：主机 + 会话启动类型；Herdr 不再写入主机配置。
+     *  [tmuxSessionName] 非空 = tmux 会话条目（面板附加/新建的目标），优先于 launchHerdr。 */
     @Serializable
     data class RecentTerminalEntry(
         val hostId: String,
         val launchHerdr: Boolean = false,
         val createdAt: Long = 0L,
+        val tmuxSessionName: String? = null,
     )
 
     private val recentSessionsKey = "termish.recent_sessions.v2"

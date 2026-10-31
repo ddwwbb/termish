@@ -851,15 +851,20 @@ fun AppRoot(repository: HostRepository) {
         }
     }
 
-    /** 主机能力入口：同一主机、同一启动类型优先复用；否则创建独立会话。 */
+    /** 主机能力入口：同一主机、同一启动类型优先复用；否则创建独立会话。
+     *  tmux 会话按（主机, 会话名）复用：同名即附加到同一远端 tmux。 */
     fun openHostTerminal(
         host: Host,
         launchMode: TerminalLaunchMode,
+        tmuxSessionName: String? = null,
     ) {
         val signature = sessionManager.signatureFor(host)
         val existing =
             sessionManager.sessions.lastOrNull {
-                it.host.id == host.id && it.launchMode == launchMode && it.credentialKey == signature
+                it.host.id == host.id &&
+                    it.launchMode == launchMode &&
+                    (launchMode != TerminalLaunchMode.TMUX || it.tmuxSessionName == tmuxSessionName) &&
+                    it.credentialKey == signature
             }
         if (existing != null) {
             currentTab = SessionTab.Terminal(existing)
@@ -867,7 +872,7 @@ fun AppRoot(repository: HostRepository) {
             return
         }
         pendingNavigate =
-            sessionManager.open(host, settings.autoReconnect, launchMode) {
+            sessionManager.open(host, settings.autoReconnect, launchMode, tmuxSessionName) {
                 hosts = repository.listHosts()
             }
     }
@@ -916,7 +921,10 @@ fun AppRoot(repository: HostRepository) {
         // 80x24 起步，herdr/tmux 按错误尺寸布局后再 resize 会整体重排跳动；
         // 直接进终端页等画布量到实际尺寸后建连，首帧即正确布局
         // （纯 shell 预连无此问题——resize 只是把提示符换行）
-        if (target.launchMode == TerminalLaunchMode.HERDR || target.host.startupCommand.isNotBlank()) {
+        if (target.launchMode == TerminalLaunchMode.HERDR ||
+            target.launchMode == TerminalLaunchMode.TMUX ||
+            target.host.startupCommand.isNotBlank()
+        ) {
             currentTab = SessionTab.Terminal(target)
             navigate(Screen.Terminal)
             pendingNavigate = null
@@ -1552,6 +1560,10 @@ fun AppRoot(repository: HostRepository) {
                                     },
                                     // 屏幕：建推流会话并切到屏幕 tab
                                     onOpenScreen = openScreen,
+                                    // tmux 面板「附加」：TMUX 启动模式打开/复用（同主机同名复用）
+                                    onAttachTmux = { host, name ->
+                                        openHostTerminal(host, TerminalLaunchMode.TMUX, tmuxSessionName = name)
+                                    },
                                     // 屏幕推流服务安装（引导卡片按钮）：流式日志 → 装完重建会话重连
                                     onInstallScreenService = installScreenService,
                                     // 屏幕重连（就地全屏）：按主机重建会话

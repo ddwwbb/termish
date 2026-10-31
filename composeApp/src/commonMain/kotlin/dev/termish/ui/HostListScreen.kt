@@ -522,7 +522,13 @@ private fun HostCard(
     // 避免“2 Disconnected”与徽章“2”重复占用同一张卡片。
     val detail =
         buildString {
-            append(if (host.connectionMode == ConnectionMode.MOSH) s.hostsModeMosh else s.hostsModeSsh)
+            append(
+                when (host.connectionMode) {
+                    ConnectionMode.MOSH -> s.hostsModeMosh
+                    ConnectionMode.TMUX -> s.hostsModeTmux
+                    ConnectionMode.SSH -> s.hostsModeSsh
+                },
+            )
             append(" · ")
             append(host.username)
             if (host.system.isNotBlank()) {

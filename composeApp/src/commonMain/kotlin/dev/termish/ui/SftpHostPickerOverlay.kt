@@ -102,7 +102,13 @@ private fun SftpHostRow(
     val address = if (host.port != 22) "${host.hostname}:${host.port}" else host.hostname
     val detail =
         buildString {
-            append(if (host.connectionMode == ConnectionMode.MOSH) s.hostsModeMosh else s.hostsModeSsh)
+            append(
+                when (host.connectionMode) {
+                    ConnectionMode.MOSH -> s.hostsModeMosh
+                    ConnectionMode.TMUX -> s.hostsModeTmux
+                    ConnectionMode.SSH -> s.hostsModeSsh
+                },
+            )
             append(", ")
             append(host.username)
             if (host.system.isNotBlank()) {

@@ -282,4 +282,51 @@ class SessionManagerTest {
         assertEquals(fake, entry.session)
         assertEquals(1234L, entry.createdAt)
     }
+
+    // ---------- tmux 会话（面板附加/新建目标） ----------
+
+    @Test
+    fun openTmuxReusesSameSessionNameAndCreatesForDifferentNames() {
+        val r = repo()
+        val m = SessionManager(r)
+
+        val first = m.open(host("a"), autoReconnect = true, launchMode = TerminalLaunchMode.TMUX, tmuxSessionName = "dev")
+        val reused = m.open(host("a"), autoReconnect = true, launchMode = TerminalLaunchMode.TMUX, tmuxSessionName = "dev")
+        val other = m.open(host("a"), autoReconnect = true, launchMode = TerminalLaunchMode.TMUX, tmuxSessionName = "test")
+
+        assertEquals(first, reused)
+        assertNotEquals(first, other)
+        assertEquals(2, m.sessions.size)
+        assertEquals("dev", first.tmuxSessionName)
+        assertEquals(TerminalLaunchMode.TMUX, first.launchMode)
+        m.sessions.forEach { it.destroy() }
+    }
+
+    @Test
+    fun restoreRecentRebuildsTmuxSessionsDisconnected() {
+        val r = repo()
+        r.upsertHost(host("a"))
+        val m1 = SessionManager(r)
+        m1.open(host("a"), autoReconnect = true, launchMode = TerminalLaunchMode.TMUX, tmuxSessionName = "dev")
+        m1.sessions.forEach { it.destroy() }
+
+        val m2 = SessionManager(r)
+        m2.restoreRecent(r.listHosts(), autoReconnect = false)
+
+        val c = m2.sessions.single()
+        assertEquals(TerminalLaunchMode.TMUX, c.launchMode)
+        assertEquals("dev", c.tmuxSessionName)
+        assertEquals(ConnStatus.IDLE, c.status)
+        m2.sessions.forEach { it.destroy() }
+    }
+
+    @Test
+    fun tmuxSignatureDiffersBySessionName() {
+        val r = repo()
+        val m = SessionManager(r)
+        val a = m.open(host("a"), autoReconnect = true, launchMode = TerminalLaunchMode.TMUX, tmuxSessionName = "dev")
+        val b = m.open(host("a"), autoReconnect = true, launchMode = TerminalLaunchMode.TMUX, tmuxSessionName = "test")
+        assertNotEquals(a.credentialKey, b.credentialKey)
+        m.sessions.forEach { it.destroy() }
+    }
 }

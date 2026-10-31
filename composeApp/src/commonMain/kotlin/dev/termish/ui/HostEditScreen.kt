@@ -75,6 +75,7 @@ import dev.termish.data.Host
 import dev.termish.data.HostAuthMethod
 import dev.termish.data.HostRepository
 import dev.termish.data.newId
+import dev.termish.tmux.TmuxCommands
 import dev.termish.ui.theme.Sizes
 import dev.termish.ui.theme.Spacing
 
@@ -100,6 +101,7 @@ fun HostEditScreen(
     // 命令片段管理页覆盖层（主机编辑页入口）
     var showSnippets by remember { mutableStateOf(false) }
     var startupCommand by remember { mutableStateOf(existing?.startupCommand ?: "") }
+    var tmuxSessionName by remember { mutableStateOf(existing?.tmuxSessionName ?: "") }
     var moshThemeSync by remember { mutableStateOf(existing?.moshThemeSync ?: false) }
     var moshUdpPort by remember { mutableStateOf((existing?.moshUdpPort ?: 0).toString()) }
 
@@ -136,6 +138,7 @@ fun HostEditScreen(
                                 lastConnectedAt = latest?.lastConnectedAt ?: existing?.lastConnectedAt ?: 0L,
                                 knownHostFingerprint = latest?.knownHostFingerprint ?: existing?.knownHostFingerprint,
                                 startupCommand = startupCommand.trim(),
+                                tmuxSessionName = tmuxSessionName.trim(),
                                 moshThemeSync = moshThemeSync,
                                 moshUdpPort = moshUdpPort.toIntOrNull()?.takeIf { it in 1024..65535 } ?: 0,
                             )
@@ -200,14 +203,29 @@ fun HostEditScreen(
                 Text(s.editAuthKeyOrPassword)
             }
 
-            Text(s.editConnectionMode, style = MaterialTheme.typography.labelLarge)
+            Text(s.hostEdit.connectionMode, style = MaterialTheme.typography.labelLarge)
             Row(verticalAlignment = androidx.compose.ui.Alignment.CenterVertically) {
                 RadioButton(connectionMode == ConnectionMode.SSH, { connectionMode = ConnectionMode.SSH })
-                Text(s.editModeSsh)
+                Text(s.hostEdit.modeSsh)
             }
             Row(verticalAlignment = androidx.compose.ui.Alignment.CenterVertically) {
                 RadioButton(connectionMode == ConnectionMode.MOSH, { connectionMode = ConnectionMode.MOSH })
-                Text(s.editModeMosh)
+                Text(s.hostEdit.modeMosh)
+            }
+            Row(verticalAlignment = androidx.compose.ui.Alignment.CenterVertically) {
+                RadioButton(connectionMode == ConnectionMode.TMUX, { connectionMode = ConnectionMode.TMUX })
+                Text(s.hostEdit.modeTmux)
+            }
+            if (connectionMode == ConnectionMode.TMUX) {
+                OutlinedTextField(
+                    tmuxSessionName,
+                    { tmuxSessionName = it },
+                    Modifier.fillMaxWidth(),
+                    label = { Text(s.hostEdit.tmuxSessionName) },
+                    placeholder = { Text(TmuxCommands.defaultSessionName(name.ifBlank { hostname }.ifBlank { "termish" })) },
+                    supportingText = { Text(s.hostEdit.tmuxSessionNameHint) },
+                    singleLine = true,
+                )
             }
             if (authMethod != HostAuthMethod.PRIVATE_KEY) {
                 OutlinedTextField(
@@ -276,8 +294,8 @@ fun HostEditScreen(
                 startupCommand,
                 { startupCommand = it },
                 Modifier.fillMaxWidth(),
-                label = { Text(s.editStartupCommand) },
-                placeholder = { Text(s.editStartupPlaceholder) },
+                label = { Text(s.hostEdit.startupCommand) },
+                placeholder = { Text(s.hostEdit.startupPlaceholder) },
                 singleLine = true,
             )
             if (connectionMode == ConnectionMode.MOSH) {
@@ -293,9 +311,9 @@ fun HostEditScreen(
                     moshUdpPort,
                     { moshUdpPort = it },
                     Modifier.fillMaxWidth(),
-                    label = { Text(s.editMoshUdpPort) },
+                    label = { Text(s.hostEdit.moshUdpPort) },
                     placeholder = { Text("0") },
-                    supportingText = { Text(s.editMoshUdpPortHint) },
+                    supportingText = { Text(s.hostEdit.moshUdpPortHint) },
                     singleLine = true,
                     keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
                 )

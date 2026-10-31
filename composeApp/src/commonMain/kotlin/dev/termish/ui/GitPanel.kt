@@ -353,21 +353,38 @@ internal class TerminalGitCommandRunner(
                 throw GitWorkdirUnknownException()
             }
         val full = gitCommandInDirectory(dir, command)
+        return runOnControlChannel(full, timeoutMs).let { stripAnsiOutput(it) }
+    }
+
+    /**
+     * tmux 管理通道（[TerminalTmuxCommandRunner] 专用）：tmux 命令不依赖工作目录，
+     * 走与 git 相同的独立 exec 通道 / mosh 控制面连接，但跳过 `cd <workdir>`。
+     */
+    suspend fun runTmuxCommand(
+        command: String,
+        timeoutMs: Long,
+    ): String = runOnControlChannel(command, timeoutMs).let { stripAnsiOutput(it) }
+
+    /** 通道选择：1) 复用已认证连接的 exec 通道；2) mosh 控制面独立连接。 */
+    private suspend fun runOnControlChannel(
+        command: String,
+        timeoutMs: Long,
+    ): String {
         // 1) 独立 exec 通道：复用已认证连接（SSH/herdr）
         val session = execSession
         if (session != null) {
-            TermLog.d("git") { "run exec cwd=$dir cmd=$full" }
+            TermLog.d("git") { "run exec cmd=$command" }
             return withContext(ioDispatcher()) {
-                session.runCommand(full, timeoutMs) ?: throw GitTimeoutException()
-            }.let { stripAnsiOutput(it) }
+                session.runCommand(command, timeoutMs) ?: throw GitTimeoutException()
+            }
         }
         // 2) mosh 控制面连接：SSH 引导通道已关，懒建独立连接（mosh 官方架构）
         if (controller.moshSession != null) {
-            TermLog.d("git") { "run aux-ssh cwd=$dir cmd=$full" }
+            TermLog.d("git") { "run aux-ssh cmd=$command" }
             return withContext(ioDispatcher()) {
                 val aux = newAuxConnection() ?: throw GitTimeoutException()
                 try {
-                    aux.connectAndRun(full, timeoutMs).output
+                    aux.connectAndRun(command, timeoutMs).output
                 } catch (e: Exception) {
                     TermLog.w("git") { "aux ssh failed: ${e.message}" }
                     throw GitTimeoutException()
@@ -377,7 +394,7 @@ internal class TerminalGitCommandRunner(
                     } catch (_: Exception) {
                     }
                 }
-            }.let { stripAnsiOutput(it) }
+            }
         }
         // 断连竞态等极端情况：exec/mosh 通道都不可用
         throw GitWorkdirUnknownException()

@@ -88,6 +88,9 @@ internal fun awaitHostKeyPromptAnswer(deferred: CompletableDeferred<Boolean>): B
 enum class TerminalLaunchMode {
     SHELL,
     HERDR,
+
+    /** tmux 会话：经 PTY exec 附加/新建指定 tmux 会话（面板/恢复入口），非文本注入。 */
+    TMUX,
 }
 
 class TerminalController(
@@ -97,8 +100,10 @@ class TerminalController(
     internal val repository: HostRepository,
     /** 意外断线时自动重连（指数退避，最多 3 次）。 */
     internal val autoReconnect: Boolean = true,
-    /** 本次会话启动普通 shell 或 herdr；不属于主机连接配置。 */
+    /** 本次会话启动普通 shell / herdr / tmux；不属于主机连接配置。 */
     val launchMode: TerminalLaunchMode = TerminalLaunchMode.SHELL,
+    /** TMUX 模式的目标会话名（launchMode == TMUX 时必填）。 */
+    val tmuxSessionName: String? = null,
     /** 连接错误文案提供器（随语言切换取最新 AppStrings）。 */
     private val strings: () -> AppStrings = { appStringsFor("en") },
     /** 条目首次创建时间；断线重连与进程恢复后保持不变。 */
@@ -107,6 +112,9 @@ class TerminalController(
     internal val sessionFactory: (SshConnection, SshCallbacks) -> SshSession = ::createSshSession,
 ) {
     internal val launchHerdr: Boolean get() = launchMode == TerminalLaunchMode.HERDR
+
+    /** TMUX 启动模式（面板附加/新建 tmux 会话，走 PTY exec）。 */
+    internal val launchTmux: Boolean get() = launchMode == TerminalLaunchMode.TMUX && !tmuxSessionName.isNullOrBlank()
     val buffer = TerminalBuffer(80, 24, maxScrollbackLines = 10_000)
     val emulator = TerminalEmulator(buffer)
     val selection = TerminalSelection(buffer)
@@ -191,7 +199,7 @@ class TerminalController(
     internal var moshDegradedToSsh = false
 
     /** 本会话创建时的凭据签名：主机编辑后凭据变化即可据此判定旧会话过期。 */
-    val credentialKey: String = credentialSignature(host, password, privateKeyPem)
+    val credentialKey: String = credentialSignature(host, password, privateKeyPem, tmuxSessionName)
 
     companion object {
         /** SSH 输出队列容量（chunk 数，单 chunk ≤64KB）：满时 reader 协程挂起施加

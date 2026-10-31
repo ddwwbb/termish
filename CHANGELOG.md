@@ -5,6 +5,18 @@
 
 ## [Unreleased]
 
+### 新增
+
+- **tmux 管理面板**：终端功能菜单新增 tmux 入口，列表显示远端 tmux 会话（窗口数/附加客户端/创建时间），支持附加（新终端会话，静默+清屏注入或 mosh 直接 exec）、新建、重命名、分离与终止（终止需确认）；未安装、查询失败、零会话三种状态分开显示，失败可重试
+- **tmux 启动模式**：面板「附加/新建」以 TMUX 启动模式打开终端会话，同主机同名会话复用；会话列表跨进程重启恢复（未连接状态，点击重连）；SSH 与 mosh 均可用（mosh 经 `mosh-server -- sh -c 'tmux …'` 直接 exec，不经登录 shell）
+- **TERM 协商**：tmux 附加前内联协商远端可用 TERM（`tput clear` 逐级判定），规避「新建正常、附加秒关」；`tmux -u` 强制 UTF-8，中文会话名不乱码
+
+### tmux panel (tmux management)
+
+- Terminal tool menu gains a tmux entry listing remote tmux sessions (windows / attached clients / created time) with attach (dedicated terminal session, quiet+clear injection on SSH or direct exec via mosh), create, rename, detach and kill (kill requires confirmation); not-installed, error and empty states are shown separately with retry
+- Attach/create opens a TMUX launch-mode terminal session, reusing an existing tab for the same host and session name; entries survive process restarts as disconnected rows; works over SSH and mosh alike
+- TERM is negotiated inline before attaching (`tput clear` probing), avoiding "new session works but attach exits immediately"; `tmux -u` forces UTF-8 output so CJK session names survive
+
 ## [1.8.14] - 2026-10-19
 
 ### 新增

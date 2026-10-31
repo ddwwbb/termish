@@ -2,6 +2,7 @@ package dev.termish.ui
 
 import androidx.compose.runtime.mutableStateListOf
 import dev.termish.crypto.Sha256
+import dev.termish.data.ConnectionMode
 import dev.termish.data.Host
 import dev.termish.data.HostRepository
 import dev.termish.data.HostRepository.RecentSftpEntry
@@ -143,13 +144,20 @@ class SessionManager(
         repository.loadRecentTerminalEntries().forEach { entry ->
             val host = byId[entry.hostId] ?: return@forEach
             val (pw, key) = resolveCredentials(host)
+            val launch =
+                when {
+                    entry.tmuxSessionName != null -> TerminalLaunchMode.TMUX
+                    entry.launchHerdr -> TerminalLaunchMode.HERDR
+                    else -> TerminalLaunchMode.SHELL
+                }
             TerminalController(
                 host,
                 pw,
                 key,
                 repository,
                 autoReconnect,
-                launchMode = if (entry.launchHerdr) TerminalLaunchMode.HERDR else TerminalLaunchMode.SHELL,
+                launchMode = launch,
+                tmuxSessionName = entry.tmuxSessionName,
                 strings = strings,
                 createdAt = entry.createdAt.takeIf { it > 0L } ?: Clock.System.now().toEpochMilliseconds(),
             ).also {
@@ -184,6 +192,7 @@ class SessionManager(
                     hostId = it.host.id,
                     launchHerdr = it.launchMode == TerminalLaunchMode.HERDR,
                     createdAt = it.createdAt,
+                    tmuxSessionName = if (it.launchMode == TerminalLaunchMode.TMUX) it.tmuxSessionName else null,
                 )
             },
         )
@@ -200,9 +209,29 @@ class SessionManager(
         host: Host,
         autoReconnect: Boolean,
         launchMode: TerminalLaunchMode = TerminalLaunchMode.SHELL,
+        tmuxSessionName: String? = null,
         onSystemDetected: ((Host) -> Unit)? = null,
     ): TerminalController {
         TermLog.i("session") { "open ${host.name} (${sessions.count { it.host.id == host.id } + 1}th)" }
+        // tmux 会话：同主机 + 同会话名的活跃条目直接复用（附加到同一远端 tmux，
+        // 缓冲保留）；主机连接方式 = TMUX（tmux 直连）同样按主机复用单会话；
+        // 普通会话每次新建（Termius 风格多会话）。
+        if (launchMode == TerminalLaunchMode.TMUX && !tmuxSessionName.isNullOrBlank() ||
+            launchMode == TerminalLaunchMode.SHELL && host.connectionMode == ConnectionMode.TMUX
+        ) {
+            sessions
+                .firstOrNull {
+                    it.host.id == host.id &&
+                        (
+                            it.launchMode == TerminalLaunchMode.TMUX ||
+                                (it.launchMode == TerminalLaunchMode.SHELL && it.host.connectionMode == ConnectionMode.TMUX)
+                        ) &&
+                        it.tmuxSessionName == tmuxSessionName
+                }?.let { existing ->
+                    TermLog.i("session") { "reuse tmux session ${host.name}/$tmuxSessionName" }
+                    return existing
+                }
+        }
         // 同一主机支持多个会话（Termius 风格）：每次打开都新建，
         // 旧的保留在列表，可从卡片下拉/连接页重入。
         val (pw, key) = resolveCredentials(host)
@@ -214,6 +243,7 @@ class SessionManager(
                 repository,
                 autoReconnect,
                 launchMode = launchMode,
+                tmuxSessionName = tmuxSessionName,
                 strings = strings,
             )
         controller.onSystemDetected = onSystemDetected
@@ -362,15 +392,19 @@ class SessionManager(
     }
 }
 
-/** 凭据/连接参数/启动命令签名：任一变化即视为旧会话过期（编辑主机后需重建会话）。 */
+/** 凭据/连接参数/启动命令签名：任一变化即视为旧会话过期（编辑主机后需重建会话）。
+ *  tmux 会话条目另含目标会话名：同名同主机才复用同一 controller。 */
 internal fun credentialSignature(
     host: Host,
     password: String?,
     privateKeyPem: String?,
+    tmuxSessionName: String? = null,
 ): String {
     // 敏感字段只保留散列：避免明文密码/私钥以签名串形式常驻内存
     fun hash(s: String?): String = if (s == null) "-" else base64Encode(Sha256.digest(s.encodeToByteArray()))
     return "${host.username}@${host.hostname}:${host.port}|${host.authMethod}|" +
         "${hash(password)}|${hash(privateKeyPem)}|" +
-        "${host.startupCommand}|${host.connectionMode}|${host.moshUdpPort}|${host.moshThemeSync}"
+        "${host.startupCommand}|${host.connectionMode}|${host.moshUdpPort}|${host.moshThemeSync}|" +
+        "${host.tmuxSessionName}" +
+        (tmuxSessionName?.let { "|tmux:$it" } ?: "")
 }

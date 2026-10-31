@@ -11,11 +11,13 @@ enum class HostAuthMethod {
     KEY_OR_PASSWORD,
 }
 
-/** 连接方式：SSH 终端（默认）或 Mosh（需要远端安装 mosh-server）。 */
+/** 连接方式：SSH 终端（默认）、Mosh（需要远端安装 mosh-server）或 tmux（SSH + PTY exec 附加指定会话）。 */
 @Serializable
 enum class ConnectionMode {
     SSH,
     MOSH,
+    /** tmux 直连：SSH 传输 + PTY exec `tmux -u new-session -A -s <会话名>`，不经登录 shell。 */
+    TMUX,
 }
 
 @Serializable
@@ -54,6 +56,11 @@ data class Host(
      * 并把该 UDP 端口转发到远端主机。
      */
     val moshUdpPort: Int = 0,
+    /**
+     * 连接方式为 tmux 时的目标会话名；空 = 用主机名派生默认名。
+     * 会话不存在则创建（`new-session -A`），存在则附加。
+     */
+    val tmuxSessionName: String = "",
 )
 
 @Serializable

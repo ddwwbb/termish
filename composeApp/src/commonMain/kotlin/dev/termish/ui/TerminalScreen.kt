@@ -35,6 +35,7 @@ import androidx.compose.material.icons.automirrored.filled.KeyboardArrowLeft
 import androidx.compose.material.icons.filled.AccountTree
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.Close
+import androidx.compose.material.icons.filled.DeveloperBoard
 import androidx.compose.material.icons.filled.FolderOpen
 import androidx.compose.material.icons.filled.Link
 import androidx.compose.material.icons.filled.Monitor
@@ -203,6 +204,8 @@ fun TerminalScreen(
     onReconnectSftp: (SessionTab.Sftp) -> Unit = {},
     /** 屏幕（菜单项）：打开当前主机的远程画面。 */
     onOpenScreen: (Host) -> Unit = {},
+    /** tmux 面板「附加」：以 TMUX 启动模式打开/复用该主机的 tmux 会话（AppRoot 实现）。 */
+    onAttachTmux: (Host, String) -> Unit = { _, _ -> },
     /** 屏幕断线重连：重建推流会话替换 tab。 */
     onReconnectScreen: (SessionTab.Screen) -> Unit = {},
     /** 屏幕重连（就地全屏用，按主机定位会话）。 */
@@ -332,6 +335,7 @@ fun TerminalScreen(
                         onSftpPathChanged = onSftpPathChanged,
                         onAskAgent = onAskAgent,
                         onOpenScreen = onOpenScreen,
+                        onAttachTmux = onAttachTmux,
                         screenPip = screenPip,
                         onCloseScreenPip = onCloseScreenPip,
                         onInstallScreenService = onInstallScreenService,
@@ -477,6 +481,8 @@ private fun TerminalBody(
     onAskAgent: (Host, AgentLaunchContext) -> Unit = { _, _ -> },
     /** 屏幕（菜单项）：打开当前主机的远程画面。 */
     onOpenScreen: (Host) -> Unit = {},
+    /** tmux 面板「附加」：以 TMUX 启动模式打开/复用该主机的 tmux 会话（AppRoot 实现）。 */
+    onAttachTmux: (Host, String) -> Unit = { _, _ -> },
     /** 终端页小窗：当前主机活跃屏幕会话的 uiState（点击 = 就地全屏）。 */
     screenPip: ScreenUiState? = null,
     /** 小窗 ✕：关闭当前屏幕会话（由 AppRoot 销毁会话并移除条目）。 */
@@ -502,6 +508,8 @@ private fun TerminalBody(
     var snippetOpen by remember { mutableStateOf(false) }
     // Git 面板（FAB 与工具栏「⎇」键共用开关）
     var gitPanelOpen by remember { mutableStateOf(false) }
+    // tmux 管理面板（功能菜单入口；附加走 TMUX 启动模式终端会话）
+    var tmuxPanelOpen by remember { mutableStateOf(false) }
     // 右下角功能菜单展开状态（语音 / Git / 未来功能）
     var toolMenuOpen by remember { mutableStateOf(false) }
 
@@ -1058,6 +1066,23 @@ private fun TerminalBody(
                     modifier = Modifier.align(Alignment.Center).fillMaxSize(),
                 )
 
+                // tmux 管理面板：列表/新建/管理走独立 exec 通道；「附加」经
+                // onAttachTmux 以 TMUX 启动模式打开（复用或新建终端会话）。
+                TmuxOverlay(
+                    connected = controller.status == ConnStatus.CONNECTED,
+                    runner = remember(controller) { TerminalTmuxCommandRunner(TerminalGitCommandRunner(controller)) },
+                    theme = theme,
+                    open = tmuxPanelOpen,
+                    onOpenChange = { tmuxPanelOpen = it },
+                    onAttach = { name ->
+                        tmuxPanelOpen = false
+                        onAttachTmux(controller.host, name)
+                    },
+                    bottomInset = with(density) { (toolbarHeightPx + navBarsBottomPx).toDp() + 12.dp },
+                    onToast = { msg -> scope.launch { snackbar.showSnackbar(msg) } },
+                    modifier = Modifier.align(Alignment.Center).fillMaxSize(),
+                )
+
                 // 屏幕小窗（画中画）：右上角悬浮远程画面，点击 = 就地全屏
                 // （全屏覆盖层在 TerminalScreen 根层，见 TerminalScreen）。
                 // ⚠️ 收起动画期间不显示小窗（等 expandAnim 归零）：否则小窗与
@@ -1122,6 +1147,16 @@ private fun TerminalBody(
                                     onClick = {
                                         toolMenuOpen = false
                                         gitPanelOpen = true
+                                    },
+                                ),
+                                CanvasMenuAction(
+                                    id = "tmux",
+                                    label = s.tmux.menuLabel,
+                                    icon = Icons.Filled.DeveloperBoard,
+                                    badge = MaterialTheme.colorScheme.primary,
+                                    onClick = {
+                                        toolMenuOpen = false
+                                        tmuxPanelOpen = true
                                     },
                                 ),
                                 CanvasMenuAction(

@@ -13,6 +13,7 @@ import dev.termish.ssh.createKmpMoshSession
 import dev.termish.ssh.detectSystemFromOutput
 import dev.termish.ssh.parseMoshConnect
 import dev.termish.ssh.parseMoshServerPid
+import dev.termish.tmux.TmuxCommands
 import dev.termish.util.NetworkChangeKind
 import dev.termish.util.TermLog
 import dev.termish.util.TermTrace
@@ -184,7 +185,10 @@ internal class SessionConnector(
                         doConnectMosh(generation = generation)
                         return@launch
                     }
-                    ConnectionMode.SSH -> {}
+                    // tmux 直连：与 SSH 同一条传输路径（登录 shell 起来后经静默+
+                    // 清屏注入 tmux 命令）；远端缺 tmux 时命令回落登录壳并显示错误。
+                    // 走 SSH 路径后由 finishConnected 的 TMUX 分支注入。
+                    ConnectionMode.TMUX, ConnectionMode.SSH -> {}
                 }
                 val s = c.sessionFactory(newConnection(), c.callbacks(trace, generation))
                 if (!isCurrentGeneration(generation)) {
@@ -220,6 +224,13 @@ internal class SessionConnector(
                     }
                     c.herdrBin = probed.bin
                     TermLog.i("herdr") { "herdr probe ok ${c.host.name} bin=${probed.bin}" }
+                }
+                // tmux 直连（主机连接方式 = TMUX）：登录 shell 已起（connectAndStart），
+                // 经静默+清屏注入 tmux 命令（与 herdr 注入同机制，防 MOTD 竞态）。
+                // 会话名优先取主机配置，空则按主机名派生。
+                if (c.host.connectionMode == ConnectionMode.TMUX && !c.launchTmux) {
+                    val name = c.host.tmuxSessionName.ifBlank { TmuxCommands.defaultSessionName(c.host.name) }
+                    sendTmuxLaunch(s, TmuxCommands.attachOrCreateCmd(name))
                 }
                 finishConnected(s, generation)
             } catch (e: kotlinx.coroutines.CancellationException) {
@@ -333,10 +344,11 @@ internal class SessionConnector(
                 return
             }
             val bootstrapExtra =
-                if (c.launchHerdr) {
-                    " -- ${shSingleQuote(c.herdrBin ?: "herdr")}"
-                } else {
-                    ""
+                when {
+                    c.launchHerdr -> " -- ${shSingleQuote(c.herdrBin ?: "herdr")}"
+                    // tmux 会话：mosh 直接跑 tmux（sh -c 包装，mosh-server execvp 需要）
+                    c.launchTmux -> " -- ${shSingleQuote(TmuxCommands.attachOrCreateCmd(c.tmuxSessionName!!))}"
+                    else -> ""
                 }
 
             // 2. 同连接引导 mosh-server（runCommand 复用已认证连接；探测输出跟在
@@ -784,12 +796,14 @@ internal class SessionConnector(
         c.moshNeedsSudoPassword = false
         c.moshDegradedToSsh = true
         val cmd =
-            if (c.launchHerdr) {
-                c.herdrBin
-            } else {
-                c.host.startupCommand
-                    .trim()
-                    .takeIf { it.isNotBlank() }
+            when {
+                c.launchHerdr -> c.herdrBin
+                // tmux 会话降级：注入静默+清屏路径，与其他会话启动命令同机制
+                c.launchTmux -> TmuxCommands.attachOrCreateCmd(c.tmuxSessionName!!)
+                else ->
+                    c.host.startupCommand
+                        .trim()
+                        .takeIf { it.isNotBlank() }
             }
         if (cmd != null) {
             if (c.launchHerdr) {
@@ -850,16 +864,24 @@ internal class SessionConnector(
             }
         }
         // 启动入口：Herdr 会话优先（herdr 即入口，探测拿到的完整路径）；
-        // 否则启动命令（如 tmux new -A -s main，实现会话现场恢复）
+        // tmux 会话走静默+清屏注入（防 MOTD 竞态）；主机连接方式 = TMUX 时
+        // 按主机配置的会话名（空则派生）注入；否则主机启动命令
+        // （如 tmux new -A -s main，实现会话现场恢复）
         if (sendStartup) {
-            if (c.launchHerdr) {
-                sendHerdrLaunch(s)
-            } else {
-                val cmd =
-                    c.host.startupCommand
-                        .trim()
-                        .takeIf { it.isNotBlank() }
-                if (cmd != null) s.sendData((cmd + "\n").encodeToByteArray())
+            when {
+                c.launchHerdr -> sendHerdrLaunch(s)
+                c.launchTmux -> sendTmuxLaunch(s, TmuxCommands.attachOrCreateCmd(c.tmuxSessionName!!))
+                c.host.connectionMode == ConnectionMode.TMUX -> {
+                    val name = c.host.tmuxSessionName.ifBlank { TmuxCommands.defaultSessionName(c.host.name) }
+                    sendTmuxLaunch(s, TmuxCommands.attachOrCreateCmd(name))
+                }
+                else -> {
+                    val cmd =
+                        c.host.startupCommand
+                            .trim()
+                            .takeIf { it.isNotBlank() }
+                    if (cmd != null) s.sendData((cmd + "\n").encodeToByteArray())
+                }
             }
         }
         // herdr 工作台：连接就绪后启动 agent 监控（blocked 通知的轮询源）。
@@ -910,6 +932,31 @@ internal class SessionConnector(
         c.scope.launch {
             delay(MOSH_DEGRADE_NOTICE_MS)
             if (c.errorMessage === message) c.errorMessage = null
+        }
+    }
+
+    /**
+     * 经 shell 注入 tmux 附加/新建命令（SSH 路径；Mosh 路径由引导参数 `-- sh -c '…'`
+     * 直接 exec，无 MOTD 竞态）。复用 herdr 的静默+清屏注入机制：
+     * 等 MOTD 打完、清屏后再注入，tmux 起始画面干净。
+     */
+    private fun sendTmuxLaunch(
+        s: SshSession,
+        command: String,
+    ) {
+        c.scope.launch {
+            val t0 = c.nowMs()
+            while (c.nowMs() - c.lastOutputAtMs < HERDR_OUTPUT_QUIET_MS &&
+                c.nowMs() - t0 < HERDR_INJECT_MAX_WAIT_MS
+            ) {
+                delay(HERDR_QUIET_POLL_MS)
+            }
+            if (c.session !== s || c.status != ConnStatus.CONNECTED) return@launch
+            // 命令串不带换行：必须补 \n 触发执行，否则命令只贴在输入行上，
+            // 要等用户手敲一次回车 tmux 才启动（herdr 注入的命令串自带 \n，
+            // 普通启动命令在调用点补 \n——这里是漏掉的第三处）
+            s.sendData((command + "\n").encodeToByteArray())
+            TermLog.i("tmux") { "injected tmux launch (quiet+clear) ${c.host.name} session=${c.tmuxSessionName}" }
         }
     }
 
@@ -985,8 +1032,9 @@ internal class SessionConnector(
             if (c.status == ConnStatus.CONNECTED) c.reconnectAttempts = 0
         }
         // 启动命令仅普通会话发送：herdr 工作台下 mosh-server 直接跑 herdr
-        // （`-- herdr`），再发启动命令会打进 herdr TUI 的输入流
-        if (!c.launchHerdr && c.host.startupCommand.isNotBlank()) {
+        // （`-- herdr`），tmux 会话下 mosh-server 直接跑 `sh -c 'tmux …'`——
+        // 两者再发启动命令都会打进 TUI 输入流
+        if (!c.launchHerdr && !c.launchTmux && c.host.startupCommand.isNotBlank()) {
             client.sendData((c.host.startupCommand.trim() + "\n").encodeToByteArray())
         }
         c.frame++
@@ -999,11 +1047,18 @@ internal class SessionConnector(
      * herdr 会像收到终端应答一样解析。
      */
     private fun prepareThemeSync() {
-        // 仅 TUI 会话（herdr 工作台 / 配置了启动命令的 herdr、tmux 等）才注入：
+        // 仅 TUI 会话（herdr 工作台 / tmux 会话 / tmux 直连主机 / 配置了启动命令的会话）才注入：
         // 注入的 OSC 应答会作为「用户输入」送达远端 shell，普通 shell（bash
         // readline）不解析 OSC，会把 ESC]10;… 原样回显成特殊字符。有 TUI 才
         // 会查询终端主题，注入才安全有效。
-        if (!c.host.moshThemeSync || (!c.launchHerdr && c.host.startupCommand.isBlank())) return
+        if (!c.host.moshThemeSync ||
+            (
+                !c.launchHerdr && !c.launchTmux &&
+                    c.host.connectionMode != ConnectionMode.TMUX && c.host.startupCommand.isBlank()
+            )
+        ) {
+            return
+        }
         c.moshThemePayload = c.emulator.buildThemeSyncPayload()
         c.moshThemeInjected = false
     }
