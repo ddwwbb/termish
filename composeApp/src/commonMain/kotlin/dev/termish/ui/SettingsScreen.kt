@@ -65,10 +65,8 @@ import dev.termish.util.BackgroundProtectionState
 import dev.termish.util.TermLog
 import dev.termish.util.openApplicationSettings
 
-// ---- 关于区外链（官网 / 联系邮箱） ----
 private const val WEBSITE_URL = "https://termish.dev"
 private const val WEBSITE_HOST = "termish.dev"
-private const val CONTACT_EMAIL = "ttermish@gmail.com"
 internal const val PRIVACY_POLICY_URL = "https://termish.dev/privacy"
 
 private fun themeModeLabel(
@@ -201,6 +199,10 @@ fun SettingsScreen(
                     haptics = it
                     persist()
                 }
+                HorizontalDivider(color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.08f))
+                SettingsSwitchItem(s.featureVisibility.showAgentEntry, settings.showAgentEntry) {
+                    onChange(settings.copy(showAgentEntry = it))
+                }
             }
 
             SettingsGroup(s.settingsGroupTerminal) {
@@ -208,6 +210,13 @@ fun SettingsScreen(
                     s.settingsTerminalPalette,
                     TerminalThemes.ALL.getOrElse(terminalThemeIndex) { TerminalThemes.ALL[0] }.name,
                 ) { onOpenSub(SettingsSubPage.TERMINAL) }
+                HorizontalDivider(color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.08f))
+                SettingsOptionItem(
+                    s.keyToolbar.settingsTitle,
+                    if (settings.keyToolbarLayout == null) s.keyToolbar.statusDefault else s.keyToolbar.statusCustom,
+                ) { onOpenSub(SettingsSubPage.KEY_TOOLBAR) }
+                HorizontalDivider(color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.08f))
+                SettingsOptionItem(s.featureVisibility.terminalTools, "") { onOpenSub(SettingsSubPage.TERMINAL_TOOLS) }
                 HorizontalDivider(color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.08f))
                 SettingsOptionItem(s.settingsTerminalType, terminalType) {
                     showTerminalTypeDialog = true
@@ -277,16 +286,12 @@ fun SettingsScreen(
                 }
             }
 
-            // 关于：设置页底部固定生态位（业界惯例：Termius/Blink 等均在底部放
-            // 版本 + 官网/文档/仓库入口）。点击跳浏览器，Android / iOS 统一走 LocalUriHandler。
             SettingsGroup(s.settingsGroupAbout) {
                 SettingsOptionItem(s.settingsVersion, APP_VERSION) {}
                 HorizontalDivider(color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.08f))
                 SettingsOptionItem(s.settingsWebsite, WEBSITE_HOST) { uriHandler.openUri(WEBSITE_URL) }
                 HorizontalDivider(color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.08f))
                 SettingsOptionItem(s.permissions.privacyPolicy, "") { onOpenSub(SettingsSubPage.PRIVACY) }
-                HorizontalDivider(color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.08f))
-                SettingsOptionItem(s.settingsContact, CONTACT_EMAIL) { uriHandler.openUri("mailto:$CONTACT_EMAIL") }
             }
 
             Spacer(Modifier.height(24.dp))
@@ -320,6 +325,29 @@ fun SettingsScreen(
                 persist()
             },
             onChangeFont = { fontId -> onChange(settings.copy(terminalFontId = fontId)) },
+            onBack = { onOpenSub(null) },
+        )
+    }
+    AnimatedVisibility(
+        visible = subPage == SettingsSubPage.KEY_TOOLBAR,
+        enter = slideInHorizontally(initialOffsetX = { it }) + fadeIn(animationSpec = tween(240)),
+        exit = slideOutHorizontally(targetOffsetX = { it }) + fadeOut(animationSpec = tween(200)),
+    ) {
+        SettingsKeyToolbarScreen(
+            layout = settings.keyToolbarLayout,
+            theme = TerminalThemes.ALL.getOrElse(terminalThemeIndex) { TerminalThemes.ALL[0] },
+            onChangeLayout = { updated -> onChange(settings.copy(keyToolbarLayout = updated)) },
+            onBack = { onOpenSub(null) },
+        )
+    }
+    AnimatedVisibility(
+        visible = subPage == SettingsSubPage.TERMINAL_TOOLS,
+        enter = slideInHorizontally(initialOffsetX = { it }) + fadeIn(animationSpec = tween(240)),
+        exit = slideOutHorizontally(targetOffsetX = { it }) + fadeOut(animationSpec = tween(200)),
+    ) {
+        SettingsTerminalToolsScreen(
+            settings = settings,
+            onChange = onChange,
             onBack = { onOpenSub(null) },
         )
     }
@@ -568,7 +596,7 @@ private fun SettingsSliderItem(
 
 /** 开关型设置行。 */
 @Composable
-private fun SettingsSwitchItem(
+internal fun SettingsSwitchItem(
     title: String,
     checked: Boolean,
     onCheckedChange: (Boolean) -> Unit,

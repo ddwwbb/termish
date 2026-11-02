@@ -94,7 +94,7 @@ fun CanvasToolMenu(
         ) {
             Icon(
                 Icons.Filled.Add,
-                contentDescription = null,
+                contentDescription = LocalAppStrings.current.featureVisibility.terminalTools,
                 tint = onBrand,
                 modifier = Modifier.size(22.dp).rotate(rotation),
             )

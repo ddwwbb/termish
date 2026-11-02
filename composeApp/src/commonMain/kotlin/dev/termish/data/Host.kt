@@ -109,8 +109,20 @@ data class AppSettings(
     val asrProviders: List<AsrProvider> = emptyList(),
     /** Agent 模型供应商配置；密钥按 provider id 单独存 SecretStore。 */
     val agentProviders: List<AgentProvider> = emptyList(),
+    /** 主机菜单、会话列表及 SFTP 中的原生 Agent 入口；仅控制显示。 */
+    val showAgentEntry: Boolean = false,
+    /** 终端「更多功能」各入口独立显隐，不影响其他位置的同类入口。 */
+    val showTerminalAgentAnalysis: Boolean = false,
+    val showTerminalGit: Boolean = true,
+    val showTerminalTmux: Boolean = true,
+    val showTerminalUpload: Boolean = true,
+    val showTerminalScreen: Boolean = true,
+    val showTerminalFavorites: Boolean = true,
+    val showTerminalFileManager: Boolean = true,
     /** @deprecated 旧版单实例配置：已被 [asrProviders] 取代（迁移用）。 */
     val asrResourceId: String = "",
+    /** 终端快捷键栏自定义布局；null = 使用 [KeyToolbarLayout.DEFAULT]（恢复默认即写回 null）。 */
+    val keyToolbarLayout: KeyToolbarLayout? = null,
 )
 
 /** 每台主机独立保存的 Agent 工作区偏好，避免污染全局终端设置。 */

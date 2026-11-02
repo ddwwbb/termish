@@ -47,9 +47,16 @@
 3. **Keep coding in your terminal workflow.** Start Codex from Herdr, give it a
    task, follow its output, upload a screenshot or file when useful, inspect the
    result through the remote-screen window, then return to the terminal.
-4. **Use native chat when it fits.** The **Agents** entry provides a phone-native
+4. **Use native chat when it fits.** Enable **Settings → General → Show Agent entries**
+   (off by default). The **Agents** entry then provides a phone-native
    conversation for Codex, Claude Code and other supported CLIs. It is an
    alternative interface, not a replacement for the Herdr terminal workspace.
+
+**Settings → Terminal → More tools** controls the terminal menu entries for Agent
+analysis, Git, tmux, file uploads, remote screen, favorites and file management
+individually. Agent analysis is off by default; the others are on. Turning all
+entries off also hides the bottom-right **+** button. Terminal Agent analysis is
+independent of the Agent entries switch in General.
 
 For Agent chat, the remote host needs the agent's own login or a
 supported API provider configuration. Missing supported CLIs can be installed
@@ -70,7 +77,7 @@ you want terminal programs to survive client disconnects.
 | **Mobile development loop** | Give an agent a task, upload a screenshot or file, inspect diffs and remote files, then continue in the same terminal. |
 | **SSH + Mosh sessions** | Open multiple terminal tabs and run tmux, vim, htop or any TUI. Mosh supports network roaming and local echo prediction for typing over slower connections. |
 | **Optional native Agent chat** | Use Codex, Claude Code, Gemini CLI, OpenCode and Pi in a phone-native conversation. Follow streaming replies and tool calls, attach files, stop a task and resume conversations. |
-| **Files and input built for phones** | Upload, download, search and organize files through SFTP; preview images including SVG, and stream videos with native playback controls and seeking. Use a CTRL / ALT / ESC toolbar, touch gestures and Chinese IME support in the terminal. |
+| **Files and input built for phones** | Upload, download, search and organize files through SFTP; preview images including SVG, and stream videos with native playback controls and seeking. Use a customizable, color-coded CTRL / ALT / ESC key toolbar, touch gestures and Chinese IME support in the terminal. |
 | **Your hosts, your credentials** | Connect directly to your servers. Store saved secrets with Android Keystore or iOS Keychain. No Termish account, telemetry or hosted relay is required. |
 
 Also included: Chinese and English UI, light and dark themes, terminal palettes and quick commands.

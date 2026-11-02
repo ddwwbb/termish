@@ -181,6 +181,7 @@ internal fun isActiveStatus(status: ConnStatus): Boolean = status == ConnStatus.
 @Composable
 fun HostListScreen(
     hosts: List<Host>,
+    showAgentEntry: Boolean,
     hostSessions: Map<String, List<HostSessionItem>>,
     onAdd: () -> Unit,
     onEdit: (Host) -> Unit,
@@ -340,6 +341,7 @@ fun HostListScreen(
                         val sessions = hostSessions[host.id].orEmpty()
                         HostCard(
                             host = host,
+                            showAgentEntry = showAgentEntry,
                             sessions = sessions,
                             selectionMode = selectionMode,
                             selected = isSelected,
@@ -497,6 +499,7 @@ private fun SelectionHeader(
 @Composable
 private fun HostCard(
     host: Host,
+    showAgentEntry: Boolean,
     sessions: List<HostSessionItem>,
     selectionMode: Boolean,
     selected: Boolean,
@@ -638,6 +641,7 @@ private fun HostCard(
                 } else {
                     HostMoreMenu(
                         sessions = sessions,
+                        showAgentEntry = showAgentEntry,
                         onTerminal = onTerminal,
                         onHerdr = onHerdr,
                         onSftp = onSftp,
@@ -658,6 +662,7 @@ private fun HostCard(
 @Composable
 private fun HostMoreMenu(
     sessions: List<HostSessionItem>,
+    showAgentEntry: Boolean,
     onTerminal: () -> Unit,
     onHerdr: () -> Unit,
     onSftp: () -> Unit,
@@ -737,14 +742,16 @@ private fun HostMoreMenu(
                     onScreen()
                 },
             )
-            DropdownMenuItem(
-                text = { Text(s.hostsActionAgents) },
-                leadingIcon = { Icon(Icons.Default.SmartToy, contentDescription = null) },
-                onClick = {
-                    open = false
-                    onAgents()
-                },
-            )
+            if (showAgentEntry) {
+                DropdownMenuItem(
+                    text = { Text(s.hostsActionAgents) },
+                    leadingIcon = { Icon(Icons.Default.SmartToy, contentDescription = null) },
+                    onClick = {
+                        open = false
+                        onAgents()
+                    },
+                )
+            }
             if (sessions.isNotEmpty()) {
                 HorizontalDivider()
                 Text(

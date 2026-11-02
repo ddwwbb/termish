@@ -194,6 +194,8 @@ private sealed interface Screen {
 /** 设置页二级页（统一由 AppRoot 管理开关：返回链 + 全屏 + 底部 tab 隐藏）。 */
 enum class SettingsSubPage {
     TERMINAL,
+    KEY_TOOLBAR,
+    TERMINAL_TOOLS,
     NOTIFICATION,
     DIAGNOSTICS,
     SNIPPETS,
@@ -1031,7 +1033,7 @@ fun AppRoot(repository: HostRepository) {
     val terminalTheme = TerminalThemes.ALL.getOrElse(settings.terminalThemeIndex) { TerminalThemes.ALL[0] }
     val agentSessionItems =
         agentControllers.values
-            .filter { it.currentSession != null || it.busy || it.pendingApprovals.isNotEmpty() }
+            .filter { settings.showAgentEntry && (it.currentSession != null || it.busy || it.pendingApprovals.isNotEmpty()) }
             .map { HostSessionItem.Agent(it) }
     val activeSessionCount =
         sessionManager.sessions.count { isActiveStatus(it.status) } +
@@ -1182,6 +1184,7 @@ fun AppRoot(repository: HostRepository) {
                                             HomeTab.HOSTS ->
                                                 HostListScreen(
                                                     hosts = hosts,
+                                                    showAgentEntry = settings.showAgentEntry,
                                                     hostSessions =
                                                         (
                                                             sessionManager.sessions.map { HostSessionItem.Terminal(it) } +

@@ -110,6 +110,7 @@ import androidx.compose.ui.zIndex
 import dev.termish.data.AppSettings
 import dev.termish.data.Host
 import dev.termish.data.HostRepository
+import dev.termish.data.KeyToolbarLayout
 import dev.termish.data.SECRET_SERVICE
 import dev.termish.data.SecretStore
 import dev.termish.data.asrKeyAccount
@@ -354,6 +355,7 @@ fun TerminalScreen(
                         onFavoritesChanged = { favs -> onFavoritesChanged(tab.host, favs) },
                         onPathChanged = { p -> onSftpPathChanged(tab.host, p) },
                         onAskAgent = { context -> onAskAgent(tab.host, context) },
+                        showAgentEntry = settings.showAgentEntry,
                     )
                 is SessionTab.Screen ->
                     ScreenContent(
@@ -512,6 +514,19 @@ private fun TerminalBody(
     var tmuxPanelOpen by remember { mutableStateOf(false) }
     // 右下角功能菜单展开状态（语音 / Git / 未来功能）
     var toolMenuOpen by remember { mutableStateOf(false) }
+    val visibleToolIds =
+        buildSet {
+            if (settings.showTerminalAgentAnalysis) add("agent")
+            if (settings.showTerminalGit) add("git")
+            if (settings.showTerminalTmux) add("tmux")
+            if (settings.showTerminalUpload) add("upload")
+            if (settings.showTerminalScreen) add("screen")
+            if (settings.showTerminalFavorites) add("favorites")
+            if (settings.showTerminalFileManager) add("filemanager")
+        }
+    LaunchedEffect(visibleToolIds.isEmpty()) {
+        if (visibleToolIds.isEmpty()) toolMenuOpen = false
+    }
 
     // ---- 终端文件上传（菜单项：选目录 → 系统文件选择器 → SFTP 流式上传）----
     val uploader = remember(controller) { TerminalFileUploader(controller, scope) }
@@ -1136,7 +1151,7 @@ private fun TerminalBody(
 
                 // 右下角功能菜单：+ 展开（上传 / 文件管理 / Git，可扩展）。
                 // 语音已移至屏幕正中常驻按钮，不进菜单。屏幕全屏时隐藏。
-                if (!pipFullscreen && voiceState == VoiceUiState.IDLE) {
+                if (!pipFullscreen && voiceState == VoiceUiState.IDLE && visibleToolIds.isNotEmpty()) {
                     CanvasToolMenu(
                         menuOpen = toolMenuOpen,
                         onMenuOpenChange = { toolMenuOpen = it },
@@ -1248,7 +1263,7 @@ private fun TerminalBody(
                                         }
                                     },
                                 ),
-                            ),
+                            ).filter { it.id in visibleToolIds },
                         theme = theme,
                         modifier =
                             Modifier
@@ -1461,6 +1476,14 @@ private fun TerminalBody(
                                 altActive = false
                             },
                             onChar = { text -> controller.sendBytes(text.encodeToByteArray()) },
+                            // 自定义键（设置 → 快捷按钮）：原始字节直发，同样消耗粘性修饰键
+                            onCustom = { bytes ->
+                                if (settings.hapticFeedback) hapticTick()
+                                controller.sendBytes(bytes)
+                                ctrlActive = false
+                                altActive = false
+                            },
+                            layout = settings.keyToolbarLayout ?: KeyToolbarLayout.DEFAULT,
                             theme = theme,
                         )
                         // 命令片段插入面板（键盘工具栏「{}」触发）

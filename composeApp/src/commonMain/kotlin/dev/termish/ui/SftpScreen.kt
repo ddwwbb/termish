@@ -333,6 +333,8 @@ fun SftpContent(
     onPathChanged: (String) -> Unit = {},
     /** 将选中远端路径直接交给同主机 Agent；不经手机下载/重新上传。 */
     onAskAgent: (AgentLaunchContext) -> Unit = {},
+    /** 只控制多选栏的 Agent 分析入口；Agent 内文件浏览器默认不显示此入口。 */
+    showAgentEntry: Boolean = false,
 ) {
     val s = LocalAppStrings.current
     val scope = rememberCoroutineScope()
@@ -836,27 +838,29 @@ fun SftpContent(
                         color = MaterialTheme.colorScheme.onSurface,
                         modifier = Modifier.weight(1f),
                     )
-                    IconButton(
-                        onClick = {
-                            val selectedPaths =
-                                visible
-                                    .filter { it.name in state.selection }
-                                    .map { joinPath(path, it.name) }
-                            if (selectedPaths.isNotEmpty()) {
-                                clearSelection()
-                                sftpAgentLaunchContext(
-                                    selectedPaths,
-                                    path,
-                                    s.nativeAgents.fileContextPrompt,
-                                )?.let(onAskAgent)
-                            }
-                        },
-                    ) {
-                        Icon(
-                            Icons.Filled.SmartToy,
-                            contentDescription = s.nativeAgents.askAboutFiles,
-                            tint = MaterialTheme.colorScheme.primary,
-                        )
+                    if (showAgentEntry) {
+                        IconButton(
+                            onClick = {
+                                val selectedPaths =
+                                    visible
+                                        .filter { it.name in state.selection }
+                                        .map { joinPath(path, it.name) }
+                                if (selectedPaths.isNotEmpty()) {
+                                    clearSelection()
+                                    sftpAgentLaunchContext(
+                                        selectedPaths,
+                                        path,
+                                        s.nativeAgents.fileContextPrompt,
+                                    )?.let(onAskAgent)
+                                }
+                            },
+                        ) {
+                            Icon(
+                                Icons.Filled.SmartToy,
+                                contentDescription = s.nativeAgents.askAboutFiles,
+                                tint = MaterialTheme.colorScheme.primary,
+                            )
+                        }
                     }
                     TextButton(onClick = { selectAllVisible() }) {
                         Text(s.sftpExt.selectAll, style = MaterialTheme.typography.labelMedium)

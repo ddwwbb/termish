@@ -5,22 +5,23 @@ import androidx.compose.foundation.border
 import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.gestures.awaitEachGesture
 import androidx.compose.foundation.gestures.awaitFirstDown
+import androidx.compose.foundation.interaction.MutableInteractionSource
+import androidx.compose.foundation.interaction.collectIsPressedAsState
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.RowScope
-import androidx.compose.foundation.layout.aspectRatio
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.widthIn
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.KeyboardArrowDown
 import androidx.compose.material.icons.filled.KeyboardArrowUp
 import androidx.compose.material3.Icon
-import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
@@ -28,17 +29,26 @@ import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.lerp
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.onSizeChanged
+import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.Dp
-import androidx.compose.ui.unit.dp
+import dev.termish.data.KeyToolbarLayout
+import dev.termish.data.ToolbarAction
+import dev.termish.data.ToolbarKeyConfig
+import dev.termish.ui.theme.KeyToolbarTokens
+import dev.termish.ui.theme.Sizes
 import dev.termish.ui.theme.TerminalTheme
+import dev.termish.util.TermLog
+import dev.termish.util.monospaceFontFamily
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.isActive
@@ -146,21 +156,25 @@ private const val REPEAT_INITIAL_DELAY_MS = 400L
 private const val REPEAT_INTERVAL_MS = 60L
 
 /**
- * 终端功能键工具栏：固定两行 + 可展开到四行。
+ * 终端功能键工具栏：固定两行 + 可展开到四行，键位由 [layout] 决定
+ * （设置 → 快捷按钮可自定义；默认见 [KeyToolbarLayout.DEFAULT]）。
  *
+ * 默认布局：
  * 行 1（控制）：ESC TAB ⌃C ⌃L {} ↑ ⌨ ▾（ESC 左上、⌨ 右上拇指区；
- * ▾ 展开/收起行 3/4，会话内保持；↑ 第 6 列与行 2 的 ↓ 上下对齐）。
+ * ▾ 展开/收起行 3/4，会话内保持，固定槽位不可编辑；↑ 第 6 列与行 2 的 ↓ 上下对齐）。
  * 行 2（修饰/编辑）：CTRL ALT ⌃D / ← ↓ → ENT（CTRL/ALT 左下，同实体键盘
  * 底行；↑/↓ 第 6 列上下对齐；/ 由 onChar 直接发送）。
  * 行 3（展开）：PST ⇧⇥ DEL HOME END PGUP PGDN ⌃\\
  * 行 4（展开）：F1–F7 + ⎇（Git 面板；F8–F12 极低频不占位）。
- * 每行均 8 列等宽正方形键。
+ * 每行均 8 列等宽正方形键；空槽位渲染为同尺寸占位保持列对齐。
  *
- * - 方向键/⌫ 类支持**按住连发**（400ms 后 60ms/次）
+ * - 按功能分类着色（控制信号/编辑/功能键/导航/修饰键/面板入口），颜色取当前终端
+ *   主题的 ANSI 色；单键可在设置里覆盖（见 [accentColor]）
+ * - 方向键支持**按住连发**（400ms 后 60ms/次）
  * - 长按宏：**ESC 双发**（Claude Code 编辑历史）；**TAB → ⇧⇥**（TUI 反选/模式切换）；
- *   **⌃C/⌃D → ⌃\\**（SIGQUIT 杀顽固进程）
+ *   **⌃C/⌃D → ⌃\\**（SIGQUIT 杀顽固进程）——跟随动作走，键移到任何槽位都保留
  * - 粘性 CTRL/ALT + 系统键盘字母即可敲出 ⌃A/⌃E/⌃R 等组合（不占键位）
- * - 符号键由系统键盘提供；画布惯性滚动替代 PgUp/PgDn（展开行提供实体键）
+ * - 自定义键发送内容经 [parseKeyPayload] 解析为原始字节，由 [onCustom] 发送
  *
  * 展开状态上提至调用方（[expanded]/[onExpandedChange]），常驻两行高度经
  * [onBaseHeightChanged] 回调：画布只按常驻高度布局，展开行 3/4 覆盖画布
@@ -175,12 +189,16 @@ fun KeyToolbar(
     onKey: (SpecialKey) -> Unit,
     onToggleKeyboard: () -> Unit = {},
     onPaste: () -> Unit = {},
-    /** 命令片段插入面板（行 1 的「{}」键位）。 */
+    /** 命令片段插入面板（默认行 1 的「{}」键位）。 */
     onSnippets: () -> Unit = {},
-    /** Git 面板入口（行 4 展开的「⎇」键位；画布 FAB 的备用入口）。 */
+    /** Git 面板入口（默认行 4 展开的「⎇」键位；画布 FAB 的备用入口）。 */
     onGit: () -> Unit = {},
     /** 普通字符键（如 /），直接作为终端输入发送。 */
     onChar: (String) -> Unit = {},
+    /** 自定义键：已解析的原始字节，直接发送。 */
+    onCustom: (ByteArray) -> Unit = {},
+    /** 键位布局（设置页自定义；调用方传入前无需 normalize）。 */
+    layout: KeyToolbarLayout = KeyToolbarLayout.DEFAULT,
     /** 行 3/4 展开状态（上提：画布按常驻高度布局，展开行覆盖画布不 resize）。 */
     expanded: Boolean = false,
     onExpandedChange: (Boolean) -> Unit = {},
@@ -189,115 +207,234 @@ fun KeyToolbar(
     theme: TerminalTheme,
     modifier: Modifier = Modifier,
 ) {
+    val rows = remember(layout) { layout.normalized().rows }
+    val handlers =
+        ToolbarHandlers(
+            ctrlActive = ctrlActive,
+            altActive = altActive,
+            expanded = expanded,
+            onToggleCtrl = onToggleCtrl,
+            onToggleAlt = onToggleAlt,
+            onKey = onKey,
+            onToggleKeyboard = onToggleKeyboard,
+            onPaste = onPaste,
+            onSnippets = onSnippets,
+            onGit = onGit,
+            onChar = onChar,
+            onCustom = onCustom,
+            onExpandedChange = onExpandedChange,
+        )
     Column(
         modifier = modifier.fillMaxWidth(),
-        verticalArrangement = Arrangement.spacedBy(4.dp),
+        verticalArrangement = Arrangement.spacedBy(KeyToolbarTokens.RowGap),
     ) {
         // 行 3/4（▾ 展开）：低频键一步直达；每行保持 8 键等宽。
         // 必须放在常驻块【上方】：常驻块贴工具栏底边（位置固定），展开行从
         // 画布底边向上覆盖画布（不压缩画布、不 resize、TUI 不重排）——放下方
         // 会让工具栏整体变高、常驻两行被顶进画布区域盖住终端内容（v1.1.7 回归）
         if (expanded) {
-            Row(
-                Modifier.fillMaxWidth().padding(horizontal = 4.dp).padding(top = 2.dp),
-                horizontalArrangement = Arrangement.spacedBy(4.dp, Alignment.CenterHorizontally),
+            KeyRow(
+                Modifier
+                    .padding(horizontal = KeyToolbarTokens.ToolbarHorizontalPadding)
+                    .padding(top = KeyToolbarTokens.ToolbarTopPadding),
             ) {
-                KeyButton("PST", false, theme) { onPaste() }
-                KeyButton("⇧⇥", false, theme) { onKey(SpecialKey.SHIFT_TAB) }
-                KeyButton("DEL", false, theme) { onKey(SpecialKey.DEL) }
-                KeyButton("HOME", false, theme) { onKey(SpecialKey.HOME) }
-                KeyButton("END", false, theme) { onKey(SpecialKey.END) }
-                KeyButton("PGUP", false, theme) { onKey(SpecialKey.PGUP) }
-                KeyButton("PGDN", false, theme) { onKey(SpecialKey.PGDN) }
-                KeyButton("⌃\\", false, theme) { onKey(SpecialKey.CTRL_BACKSLASH) }
+                rows[2].forEach { ToolbarSlot(it, theme, handlers) }
             }
-            Row(
-                Modifier.fillMaxWidth().padding(horizontal = 4.dp),
-                horizontalArrangement = Arrangement.spacedBy(4.dp, Alignment.CenterHorizontally),
-            ) {
-                KeyButton("F1", false, theme) { onKey(SpecialKey.F1) }
-                KeyButton("F2", false, theme) { onKey(SpecialKey.F2) }
-                KeyButton("F3", false, theme) { onKey(SpecialKey.F3) }
-                KeyButton("F4", false, theme) { onKey(SpecialKey.F4) }
-                KeyButton("F5", false, theme) { onKey(SpecialKey.F5) }
-                KeyButton("F6", false, theme) { onKey(SpecialKey.F6) }
-                KeyButton("F7", false, theme) { onKey(SpecialKey.F7) }
-                // Git 面板入口（画布 FAB 的备用入口；F8–F12 极低频不占位）
-                KeyButton("⎇", false, theme) { onGit() }
+            KeyRow(Modifier.padding(horizontal = KeyToolbarTokens.ToolbarHorizontalPadding)) {
+                rows[3].forEach { ToolbarSlot(it, theme, handlers) }
             }
         }
         // 常驻块：行 1/2 贴工具栏底边（位置固定，展开不改变）
         Column(
             Modifier
                 .onSizeChanged { onBaseHeightChanged(it.height) }
-                .padding(horizontal = 4.dp)
-                .padding(top = 2.dp, bottom = 10.dp),
-            verticalArrangement = Arrangement.spacedBy(4.dp),
+                .padding(horizontal = KeyToolbarTokens.ToolbarHorizontalPadding)
+                .padding(top = KeyToolbarTokens.ToolbarTopPadding, bottom = KeyToolbarTokens.ToolbarBottomPadding),
+            verticalArrangement = Arrangement.spacedBy(KeyToolbarTokens.RowGap),
         ) {
-            // 行 1：ESC 左上（实体键盘位置直觉）；TAB 常驻（shell 补全高频，长按 = ⇧⇥）；
-            // {} 片段 / ⌨ / ▾ 展开靠右（拇指区）
-            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(4.dp, Alignment.CenterHorizontally)) {
-                RepeatKeyButton(
-                    "ESC",
-                    theme,
-                    onTap = { onKey(SpecialKey.ESC) },
-                    onLongPress = {
-                        onKey(SpecialKey.ESC)
-                        onKey(SpecialKey.ESC)
-                    },
-                )
-                KeyButton(
-                    "TAB",
-                    false,
-                    theme,
-                    onLongPress = { onKey(SpecialKey.SHIFT_TAB) },
-                ) { onKey(SpecialKey.TAB) }
-                RepeatKeyButton(
-                    "⌃C",
-                    theme,
-                    onTap = { onKey(SpecialKey.CTRL_C) },
-                    onLongPress = { onKey(SpecialKey.CTRL_BACKSLASH) },
-                )
-                KeyButton("⌃L", false, theme) { onKey(SpecialKey.CTRL_L) }
-                KeyButton("{}", false, theme) { onSnippets() }
-                // ↑ 保持第 6 列与行 2 的 ↓ 上下对齐（原设计约束）
-                KeyButton("↑", false, theme, repeat = true) { onKey(SpecialKey.UP) }
-                KeyButton("⌨", false, theme) { onToggleKeyboard() }
-                // 展开/收起：Material 箭头图标（22dp：48dp 触控目标配 24dp 图标的
-                // 规范内取值，比原文字符号大而清晰、又不像 30dp 那样撑满键）
-                KeyButton(
-                    "",
-                    expanded,
-                    theme,
-                    icon = if (expanded) Icons.Filled.KeyboardArrowUp else Icons.Filled.KeyboardArrowDown,
-                    iconSize = 22.dp,
-                ) { onExpandedChange(!expanded) }
-            }
-            // 行 2：CTRL/ALT 左下（同实体键盘底行）；↑/↓ 第 6 列上下对齐；ENT 右下
-            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(4.dp, Alignment.CenterHorizontally)) {
-                KeyButton("CTRL", ctrlActive, theme) { onToggleCtrl() }
-                KeyButton("ALT", altActive, theme) { onToggleAlt() }
-                RepeatKeyButton(
-                    "⌃D",
-                    theme,
-                    onTap = { onKey(SpecialKey.CTRL_D) },
-                    onLongPress = { onKey(SpecialKey.CTRL_BACKSLASH) },
-                )
-                KeyButton("/", false, theme) { onChar("/") }
-                KeyButton("←", false, theme, repeat = true) { onKey(SpecialKey.LEFT) }
-                KeyButton("↓", false, theme, repeat = true) { onKey(SpecialKey.DOWN) }
-                KeyButton("→", false, theme, repeat = true) { onKey(SpecialKey.RIGHT) }
-                KeyButton("ENT", false, theme) { onKey(SpecialKey.ENTER) }
-            }
+            KeyRow { rows[0].forEach { ToolbarSlot(it, theme, handlers) } }
+            KeyRow { rows[1].forEach { ToolbarSlot(it, theme, handlers) } }
         } // 常驻块量测结束（行 3/4 在上方，不计入 onBaseHeightChanged）
     }
 }
 
+/** 工具栏一行：8 键居中等距排列。 */
+@Composable
+internal fun KeyRow(
+    modifier: Modifier = Modifier,
+    content: @Composable RowScope.() -> Unit,
+) {
+    Row(
+        modifier.fillMaxWidth(),
+        horizontalArrangement = Arrangement.spacedBy(KeyToolbarTokens.KeyGap, Alignment.CenterHorizontally),
+        content = content,
+    )
+}
+
+/** 工具栏回调集合（避免槽位分发函数参数爆炸）。 */
+private class ToolbarHandlers(
+    val ctrlActive: Boolean,
+    val altActive: Boolean,
+    val expanded: Boolean,
+    val onToggleCtrl: () -> Unit,
+    val onToggleAlt: () -> Unit,
+    val onKey: (SpecialKey) -> Unit,
+    val onToggleKeyboard: () -> Unit,
+    val onPaste: () -> Unit,
+    val onSnippets: () -> Unit,
+    val onGit: () -> Unit,
+    val onChar: (String) -> Unit,
+    val onCustom: (ByteArray) -> Unit,
+    val onExpandedChange: (Boolean) -> Unit,
+)
+
+/** 槽位分发：按动作决定手感（连发/长按宏/粘性）与回调。 */
+@Composable
+private fun RowScope.ToolbarSlot(
+    config: ToolbarKeyConfig,
+    theme: TerminalTheme,
+    h: ToolbarHandlers,
+) {
+    val accent = config.accentColor(theme)
+    val label = config.displayLabel
+    val action = config.action
+    val actionIcon = action.icon
+    val actionIconSize = action.iconSize
+    when (action) {
+        ToolbarAction.EMPTY -> EmptyKeySlot()
+        ToolbarAction.EXPAND ->
+            KeyButton(
+                "",
+                h.expanded,
+                theme,
+                accent = accent,
+                icon = if (h.expanded) Icons.Filled.KeyboardArrowUp else Icons.Filled.KeyboardArrowDown,
+                iconSize = KeyToolbarTokens.ArrowIconSize,
+            ) { h.onExpandedChange(!h.expanded) }
+        ToolbarAction.CTRL -> KeyButton(label, h.ctrlActive, theme, accent = accent) { h.onToggleCtrl() }
+        ToolbarAction.ALT -> KeyButton(label, h.altActive, theme, accent = accent) { h.onToggleAlt() }
+        ToolbarAction.KEYBOARD ->
+            KeyButton(label, false, theme, accent = accent, icon = actionIcon, iconSize = actionIconSize) {
+                h.onToggleKeyboard()
+            }
+        ToolbarAction.SNIPPETS -> KeyButton(label, false, theme, accent = accent) { h.onSnippets() }
+        ToolbarAction.GIT ->
+            KeyButton(label, false, theme, accent = accent, icon = actionIcon, iconSize = actionIconSize) {
+                h.onGit()
+            }
+        ToolbarAction.PASTE -> KeyButton(label, false, theme, accent = accent) { h.onPaste() }
+        ToolbarAction.SLASH -> KeyButton(label, false, theme, accent = accent) { h.onChar("/") }
+        ToolbarAction.CUSTOM -> {
+            val bytes = remember(config.payload) { parseKeyPayload(config.payload).getOrNull() }
+            KeyButton(label, false, theme, accent = accent) {
+                if (bytes != null) {
+                    h.onCustom(bytes)
+                } else {
+                    // 编辑页已校验，走到这里说明持久化数据被外部改坏
+                    TermLog.w("toolbar") { "invalid custom key payload, label=$label" }
+                }
+            }
+        }
+        else -> {
+            val key = action.specialKey
+            if (key == null) {
+                EmptyKeySlot()
+            } else {
+                val longPress: (() -> Unit)? =
+                    when (action) {
+                        ToolbarAction.ESC -> {
+                            {
+                                h.onKey(SpecialKey.ESC)
+                                h.onKey(SpecialKey.ESC)
+                            }
+                        }
+                        ToolbarAction.TAB -> {
+                            { h.onKey(SpecialKey.SHIFT_TAB) }
+                        }
+                        ToolbarAction.CTRL_C, ToolbarAction.CTRL_D -> {
+                            { h.onKey(SpecialKey.CTRL_BACKSLASH) }
+                        }
+                        else -> null
+                    }
+                KeyButton(
+                    label,
+                    false,
+                    theme,
+                    accent = accent,
+                    icon = actionIcon,
+                    iconSize = actionIconSize,
+                    repeat = action.repeats,
+                    onLongPress = longPress,
+                ) { h.onKey(key) }
+            }
+        }
+    }
+}
+
 /**
- * 可复用 KeyButton：支持三种手感。
- * - repeat=true：按住连发（方向键等导航键）
- * - onLongPress：长按宏（如 ESC 双发、⌃C→⌃\）
- * - 二者互斥：连发优先；无连发且有 onLongPress 时长按触发宏一次
+ * 设置页预览槽位：与工具栏同款外观，但无连发/长按，点击仅用于选中。
+ * 空槽位显示「+」，▾ 固定槽位不可点。
+ */
+@Composable
+internal fun RowScope.ToolbarPreviewSlot(
+    config: ToolbarKeyConfig,
+    theme: TerminalTheme,
+    selected: Boolean,
+    highlight: Color,
+    onClick: () -> Unit,
+) {
+    val border = if (selected) highlight else null
+    val action = config.action
+    when (action) {
+        ToolbarAction.EMPTY ->
+            KeyButton(
+                "+",
+                false,
+                theme,
+                highlight = border,
+                dimmed = true,
+                onTap = onClick,
+            )
+        ToolbarAction.EXPAND ->
+            KeyButton(
+                "",
+                false,
+                theme,
+                accent = config.accentColor(theme),
+                icon = Icons.Filled.KeyboardArrowDown,
+                iconSize = KeyToolbarTokens.ArrowIconSize,
+                dimmed = true,
+            )
+        else ->
+            KeyButton(
+                config.displayLabel,
+                false,
+                theme,
+                accent = config.accentColor(theme),
+                icon = action.icon,
+                iconSize = action.iconSize,
+                highlight = border,
+                onTap = onClick,
+            )
+    }
+}
+
+/** 空槽位：与键同尺寸的透明占位，保持列对齐。 */
+@Composable
+private fun RowScope.EmptyKeySlot() {
+    Box(
+        Modifier
+            .weight(1f)
+            .widthIn(max = KeyToolbarTokens.KeyMaxWidth)
+            .height(KeyToolbarTokens.KeyHeight),
+    )
+}
+
+/**
+ * 现代紧凑键帽 KeyButton：
+ * - 微凸深色键帽底色 + 柔和低饱和分类着色 + 细腻描边 + 按下即时高亮反馈
+ * - 固定紧凑高度（[KeyToolbarTokens.KeyHeight]），兼顾触控手感与终端画布可视面积
+ * - 方向键/键盘/Git 使用矢量图标，文字标签统一用等宽 SemiBold 字体
  */
 @Composable
 private fun RowScope.KeyButton(
@@ -305,24 +442,28 @@ private fun RowScope.KeyButton(
     active: Boolean,
     theme: TerminalTheme,
     repeat: Boolean = false,
-    /** 图标键（如展开箭头）：渲染大号 Material 图标而非文字。 */
     icon: ImageVector? = null,
-    iconSize: Dp = 24.dp,
+    iconSize: Dp = Sizes.IconMedium,
+    accent: Color? = null,
+    highlight: Color? = null,
+    dimmed: Boolean = false,
     // 注意参数顺序：onTap 必须是最后一个参数（调用处大量使用尾随 lambda），
     // 误放 onLongPress 在末尾会让尾随 lambda 绑到长按回调——单击失灵、方向键全废
     onLongPress: (() -> Unit)? = null,
     onTap: () -> Unit = {},
 ) {
-    val bg = if (active) theme.cursor() else Color.Transparent
-    val fg = if (active) theme.background() else theme.foreground()
-    // 按住连发状态机：pressing=true 期间 LaunchedEffect 循环发送
+    val currentOnTap by rememberUpdatedState(onTap)
     var pressing by remember { mutableStateOf(false) }
+    val interactionSource = remember { MutableInteractionSource() }
+    val clickablePressed by interactionSource.collectIsPressedAsState()
+    val isPressed = pressing || clickablePressed
+
     if (repeat) {
         LaunchedEffect(pressing) {
             if (!pressing) return@LaunchedEffect
             delay(REPEAT_INITIAL_DELAY_MS)
             while (isActive && pressing) {
-                onTap()
+                currentOnTap()
                 delay(REPEAT_INTERVAL_MS)
             }
         }
@@ -331,28 +472,67 @@ private fun RowScope.KeyButton(
         }
     }
 
+    val themeBg = theme.background()
+    val themeFg = theme.foreground()
+    val neutralCap = lerp(themeBg, themeFg, KeyToolbarTokens.KEYCAP_SURFACE_LIFT)
+    val baseCap =
+        if (accent != null) {
+            lerp(neutralCap, accent, KeyToolbarTokens.ACCENT_SURFACE_BLEND)
+        } else {
+            neutralCap
+        }
+    val bg =
+        when {
+            active -> lerp(accent ?: theme.cursor(), themeBg, KeyToolbarTokens.ACTIVE_SURFACE_BLEND)
+            dimmed -> Color.Transparent
+            isPressed -> lerp(baseCap, accent ?: themeFg, KeyToolbarTokens.PRESSED_SURFACE_BLEND)
+            else -> baseCap
+        }
+    val tonedAccent =
+        if (accent != null) {
+            lerp(accent, themeFg, KeyToolbarTokens.ACCENT_TEXT_FOREGROUND_BLEND)
+        } else {
+            themeFg
+        }
+    val fg =
+        when {
+            active -> themeBg
+            dimmed -> tonedAccent.copy(alpha = KeyToolbarTokens.DIMMED_CONTENT_ALPHA)
+            else -> tonedAccent
+        }
+    val borderTint =
+        if (accent != null) {
+            lerp(themeFg, accent, KeyToolbarTokens.ACCENT_BORDER_BLEND)
+        } else {
+            themeFg
+        }
+    val borderColor =
+        when {
+            highlight != null -> highlight
+            active -> (accent ?: theme.cursor())
+            dimmed -> borderTint.copy(alpha = KeyToolbarTokens.EMPTY_SLOT_BORDER_ALPHA)
+            isPressed -> borderTint.copy(alpha = KeyToolbarTokens.PRESSED_BORDER_ALPHA)
+            accent != null -> borderTint.copy(alpha = KeyToolbarTokens.ACCENT_BORDER_ALPHA)
+            else -> themeFg.copy(alpha = KeyToolbarTokens.NEUTRAL_BORDER_ALPHA)
+        }
+    val borderWidth = if (highlight != null) KeyToolbarTokens.SelectedBorder else Sizes.BorderThin
+    val shape = RoundedCornerShape(KeyToolbarTokens.KeyCorner)
+
     Box(
         Modifier
-            .weight(1f, fill = false)
-            // 正方形键：高随宽，但宽度上限 48dp（Android 触控目标上限）——
-            // 宽屏/横屏时键保持正方形居中排列，不撑满成扁块（用户反馈：
-            // 工具栏按钮不是正方形了）。⚠️ 不能 weight(fill=true) + aspectRatio：
-            // 宽屏下键宽被强制均分放大，aspectRatio 无视高度约束返回宽×宽，
-            // 内容按超高键居中溢出被裁（v1.5.1 横屏错位根因）
-            .widthIn(max = 48.dp)
-            .aspectRatio(1f)
-            .clip(MaterialTheme.shapes.small)
+            .weight(1f)
+            .widthIn(max = KeyToolbarTokens.KeyMaxWidth)
+            .height(KeyToolbarTokens.KeyHeight)
+            .clip(shape)
             .background(bg)
-            .border(1.dp, fg.copy(alpha = 0.45f), MaterialTheme.shapes.small)
+            .border(borderWidth, borderColor, shape)
             .then(
                 if (repeat) {
-                    // pointerInput 方案：press/release 全自管，才能做按住连发
                     Modifier.pointerInput(Unit) {
                         awaitEachGesture {
-                            val down = awaitFirstDown(requireUnconsumed = false)
+                            awaitFirstDown(requireUnconsumed = false)
                             pressing = true
-                            onTap()
-                            // 等待抬起或取消；连发键无长按语义，不做单击消歧
+                            currentOnTap()
                             try {
                                 while (true) {
                                     val ev = awaitPointerEvent()
@@ -361,15 +541,15 @@ private fun RowScope.KeyButton(
                                     if (released || consumed) break
                                 }
                             } catch (_: CancellationException) {
-                                // 抬起时 awaitPointerEvent 抛取消属正常路径
                             } finally {
                                 pressing = false
                             }
                         }
                     }
                 } else {
-                    // combinedClickable：单击 + 可选长按宏
                     Modifier.combinedClickable(
+                        interactionSource = interactionSource,
+                        indication = null,
                         onClick = onTap,
                         onLongClick = onLongPress,
                     )
@@ -380,29 +560,27 @@ private fun RowScope.KeyButton(
         if (icon != null) {
             Icon(icon, contentDescription = null, tint = fg, modifier = Modifier.size(iconSize))
         } else {
+            val fontSize =
+                when {
+                    label.length == 1 -> KeyToolbarTokens.SymbolFontSize
+                    label.length >= 4 -> KeyToolbarTokens.CompactLabelFontSize
+                    else -> KeyToolbarTokens.LabelFontSize
+                }
+            val letterSpacing =
+                if (label.length >= 4) {
+                    KeyToolbarTokens.CompactLetterSpacing
+                } else {
+                    KeyToolbarTokens.NormalLetterSpacing
+                }
             Text(
                 label,
                 color = fg,
-                // 两级字号保持视觉一致：符号键（↑↓←→ ⌨ / ⎇）与 22dp 图标
-                // 同档（≈14sp 视觉）；多字符文字键（ESC/CTRL/F1…）11sp。
-                // 简单按长度分档：单字符=符号，其余=文字标签
-                style =
-                    if (label.length == 1) {
-                        MaterialTheme.typography.labelLarge
-                    } else {
-                        MaterialTheme.typography.labelSmall
-                    },
+                fontFamily = monospaceFontFamily(),
+                fontWeight = FontWeight.SemiBold,
+                fontSize = fontSize,
+                letterSpacing = letterSpacing,
                 maxLines = 1,
             )
         }
     }
 }
-
-/** 长按宏专用别名（无连发）。 */
-@Composable
-private fun RowScope.RepeatKeyButton(
-    label: String,
-    theme: TerminalTheme,
-    onTap: () -> Unit,
-    onLongPress: (() -> Unit)? = null,
-) = KeyButton(label, false, theme, repeat = false, onLongPress = onLongPress, onTap = onTap)

@@ -22,6 +22,45 @@ class HostRepositoryTest {
     }
 
     @Test
+    fun legacySettingsUseOptInAgentAndKeepExistingTerminalToolsVisible() {
+        val storage = MapSettings()
+        storage.putString("termish.settings.v1", """{"terminalFontSize":18}""")
+        val settings = HostRepository(storage).loadSettings()
+
+        assertEquals(18, settings.terminalFontSize)
+        assertFalse(settings.showAgentEntry)
+        assertFalse(settings.showTerminalAgentAnalysis)
+        assertTrue(settings.showTerminalGit)
+        assertTrue(settings.showTerminalTmux)
+        assertTrue(settings.showTerminalUpload)
+        assertTrue(settings.showTerminalScreen)
+        assertTrue(settings.showTerminalFavorites)
+        assertTrue(settings.showTerminalFileManager)
+        assertEquals(AppSettings().copy(terminalFontSize = 18), settings)
+    }
+
+    @Test
+    fun visibilitySettingsSurviveReloadAndUnrelatedUpdates() {
+        val storage = MapSettings()
+        val repository = HostRepository(storage)
+        val settings =
+            AppSettings(
+                showAgentEntry = true,
+                showTerminalAgentAnalysis = true,
+                showTerminalGit = false,
+                showTerminalTmux = false,
+                showTerminalUpload = false,
+                showTerminalScreen = false,
+                showTerminalFavorites = false,
+                showTerminalFileManager = false,
+            )
+        repository.saveSettings(settings)
+        repository.updateSettings { it.copy(theme = ThemeMode.LIGHT) }
+
+        assertEquals(settings.copy(theme = ThemeMode.LIGHT), HostRepository(storage).loadSettings())
+    }
+
+    @Test
     fun hostsCrud() {
         val r = repo()
         assertTrue(r.listHosts().isEmpty())
