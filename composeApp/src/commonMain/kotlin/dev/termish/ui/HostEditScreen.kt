@@ -137,7 +137,7 @@ fun HostEditScreen(
                                         .toEpochMilliseconds(),
                                 lastConnectedAt = latest?.lastConnectedAt ?: existing?.lastConnectedAt ?: 0L,
                                 knownHostFingerprint = latest?.knownHostFingerprint ?: existing?.knownHostFingerprint,
-                                startupCommand = startupCommand.trim(),
+                                startupCommand = if (connectionMode == ConnectionMode.TMUX) "" else startupCommand.trim(),
                                 tmuxSessionName = tmuxSessionName.trim(),
                                 moshThemeSync = moshThemeSync,
                                 moshUdpPort = moshUdpPort.toIntOrNull()?.takeIf { it in 1024..65535 } ?: 0,
@@ -290,14 +290,16 @@ fun HostEditScreen(
                     tint = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.4f),
                 )
             }
-            OutlinedTextField(
-                startupCommand,
-                { startupCommand = it },
-                Modifier.fillMaxWidth(),
-                label = { Text(s.hostEdit.startupCommand) },
-                placeholder = { Text(s.hostEdit.startupPlaceholder) },
-                singleLine = true,
-            )
+            if (connectionMode != ConnectionMode.TMUX) {
+                OutlinedTextField(
+                    startupCommand,
+                    { startupCommand = it },
+                    Modifier.fillMaxWidth(),
+                    label = { Text(s.hostEdit.startupCommand) },
+                    placeholder = { Text(s.hostEdit.startupPlaceholder) },
+                    singleLine = true,
+                )
+            }
             if (connectionMode == ConnectionMode.MOSH) {
                 Row(
                     Modifier.fillMaxWidth(),
