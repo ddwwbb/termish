@@ -44,6 +44,51 @@ object KeyToolbarTokens {
     /** 卡片浅描边透明度。 */
     const val CARD_BORDER_ALPHA = 0.12f
 
+    /** 工具栏面板毛玻璃模糊半径（中等强度：透出背后色彩层次而不干扰键帽阅读）。 */
+    val BlurRadius = 20.dp
+
+    /** 工具栏面板毛玻璃背景着色不透明度（约 70%）。 */
+    const val PANEL_TINT_ALPHA = 0.70f
+
+    /** Android 12 以下不支持实时 RenderEffect 时的降级遮罩不透明度。 */
+    const val PANEL_FALLBACK_ALPHA = 0.88f
+
+    /** 毛玻璃面板顶部分隔高光线透明度。 */
+    const val PANEL_TOP_DIVIDER_ALPHA = 0.24f
+
+    /** 玻璃键帽顶部受光面透光不透明度。 */
+    const val GLASS_SURFACE_TOP_ALPHA = 0.62f
+
+    /** 玻璃键帽底部折射面透光不透明度。 */
+    const val GLASS_SURFACE_BOTTOM_ALPHA = 0.38f
+
+    /** 玻璃键帽按下态顶部高亮不透明度。 */
+    const val GLASS_PRESSED_TOP_ALPHA = 0.82f
+
+    /** 玻璃键帽按下态底部高亮不透明度。 */
+    const val GLASS_PRESSED_BOTTOM_ALPHA = 0.58f
+
+    /** 玻璃键帽激活态（CTRL/ALT/▾）顶部不透明度。 */
+    const val GLASS_ACTIVE_TOP_ALPHA = 0.92f
+
+    /** 玻璃键帽激活态底部不透明度。 */
+    const val GLASS_ACTIVE_BOTTOM_ALPHA = 0.78f
+
+    /** 玻璃键帽顶部高光混入亮白的比例（模拟玻璃边缘折光）。 */
+    const val GLASS_SPECULAR_WHITE_BLEND = 0.35f
+
+    /** 玻璃键帽顶部高光描边透明度。 */
+    const val GLASS_BORDER_TOP_ALPHA = 0.46f
+
+    /** 玻璃键帽底部描边透明度。 */
+    const val GLASS_BORDER_BOTTOM_ALPHA = 0.16f
+
+    /** 玻璃键帽按下态顶部描边透明度。 */
+    const val GLASS_PRESSED_BORDER_TOP_ALPHA = 0.75f
+
+    /** 玻璃键帽按下态底部描边透明度。 */
+    const val GLASS_PRESSED_BORDER_BOTTOM_ALPHA = 0.38f
+
     /** 紧凑键帽固定高度（比 1:1 大方块精致，为终端画布留出更多可视高度）。 */
     val KeyHeight = 36.dp
 

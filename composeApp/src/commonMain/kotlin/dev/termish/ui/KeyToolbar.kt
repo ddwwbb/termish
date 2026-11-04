@@ -34,7 +34,9 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.graphics.lerp
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.input.pointer.pointerInput
@@ -204,6 +206,8 @@ fun KeyToolbar(
     onExpandedChange: (Boolean) -> Unit = {},
     /** 常驻两行高度回调（px；展开不改变）——建连门槛（画布尺寸稳定）用。 */
     onBaseHeightChanged: (Int) -> Unit = {},
+    /** 是否启用毛玻璃键帽质感（半透明渐变 + 顶部折光高光描边）。 */
+    frostedGlass: Boolean = true,
     theme: TerminalTheme,
     modifier: Modifier = Modifier,
 ) {
@@ -213,6 +217,7 @@ fun KeyToolbar(
             ctrlActive = ctrlActive,
             altActive = altActive,
             expanded = expanded,
+            frostedGlass = frostedGlass,
             onToggleCtrl = onToggleCtrl,
             onToggleAlt = onToggleAlt,
             onKey = onKey,
@@ -276,6 +281,7 @@ private class ToolbarHandlers(
     val ctrlActive: Boolean,
     val altActive: Boolean,
     val expanded: Boolean,
+    val frostedGlass: Boolean,
     val onToggleCtrl: () -> Unit,
     val onToggleAlt: () -> Unit,
     val onKey: (SpecialKey) -> Unit,
@@ -300,6 +306,7 @@ private fun RowScope.ToolbarSlot(
     val action = config.action
     val actionIcon = action.icon
     val actionIconSize = action.iconSize
+    val glass = h.frostedGlass
     when (action) {
         ToolbarAction.EMPTY -> EmptyKeySlot()
         ToolbarAction.EXPAND ->
@@ -310,23 +317,55 @@ private fun RowScope.ToolbarSlot(
                 accent = accent,
                 icon = if (h.expanded) Icons.Filled.KeyboardArrowUp else Icons.Filled.KeyboardArrowDown,
                 iconSize = KeyToolbarTokens.ArrowIconSize,
+                frostedGlass = glass,
             ) { h.onExpandedChange(!h.expanded) }
-        ToolbarAction.CTRL -> KeyButton(label, h.ctrlActive, theme, accent = accent) { h.onToggleCtrl() }
-        ToolbarAction.ALT -> KeyButton(label, h.altActive, theme, accent = accent) { h.onToggleAlt() }
+        ToolbarAction.CTRL ->
+            KeyButton(label, h.ctrlActive, theme, accent = accent, frostedGlass = glass) {
+                h.onToggleCtrl()
+            }
+        ToolbarAction.ALT ->
+            KeyButton(label, h.altActive, theme, accent = accent, frostedGlass = glass) {
+                h.onToggleAlt()
+            }
         ToolbarAction.KEYBOARD ->
-            KeyButton(label, false, theme, accent = accent, icon = actionIcon, iconSize = actionIconSize) {
+            KeyButton(
+                label,
+                false,
+                theme,
+                accent = accent,
+                icon = actionIcon,
+                iconSize = actionIconSize,
+                frostedGlass = glass,
+            ) {
                 h.onToggleKeyboard()
             }
-        ToolbarAction.SNIPPETS -> KeyButton(label, false, theme, accent = accent) { h.onSnippets() }
+        ToolbarAction.SNIPPETS ->
+            KeyButton(label, false, theme, accent = accent, frostedGlass = glass) {
+                h.onSnippets()
+            }
         ToolbarAction.GIT ->
-            KeyButton(label, false, theme, accent = accent, icon = actionIcon, iconSize = actionIconSize) {
+            KeyButton(
+                label,
+                false,
+                theme,
+                accent = accent,
+                icon = actionIcon,
+                iconSize = actionIconSize,
+                frostedGlass = glass,
+            ) {
                 h.onGit()
             }
-        ToolbarAction.PASTE -> KeyButton(label, false, theme, accent = accent) { h.onPaste() }
-        ToolbarAction.SLASH -> KeyButton(label, false, theme, accent = accent) { h.onChar("/") }
+        ToolbarAction.PASTE ->
+            KeyButton(label, false, theme, accent = accent, frostedGlass = glass) {
+                h.onPaste()
+            }
+        ToolbarAction.SLASH ->
+            KeyButton(label, false, theme, accent = accent, frostedGlass = glass) {
+                h.onChar("/")
+            }
         ToolbarAction.CUSTOM -> {
             val bytes = remember(config.payload) { parseKeyPayload(config.payload).getOrNull() }
-            KeyButton(label, false, theme, accent = accent) {
+            KeyButton(label, false, theme, accent = accent, frostedGlass = glass) {
                 if (bytes != null) {
                     h.onCustom(bytes)
                 } else {
@@ -364,6 +403,7 @@ private fun RowScope.ToolbarSlot(
                     icon = actionIcon,
                     iconSize = actionIconSize,
                     repeat = action.repeats,
+                    frostedGlass = glass,
                     onLongPress = longPress,
                 ) { h.onKey(key) }
             }
@@ -381,6 +421,7 @@ internal fun RowScope.ToolbarPreviewSlot(
     theme: TerminalTheme,
     selected: Boolean,
     highlight: Color,
+    frostedGlass: Boolean = true,
     onClick: () -> Unit,
 ) {
     val border = if (selected) highlight else null
@@ -393,6 +434,7 @@ internal fun RowScope.ToolbarPreviewSlot(
                 theme,
                 highlight = border,
                 dimmed = true,
+                frostedGlass = frostedGlass,
                 onTap = onClick,
             )
         ToolbarAction.EXPAND ->
@@ -404,6 +446,7 @@ internal fun RowScope.ToolbarPreviewSlot(
                 icon = Icons.Filled.KeyboardArrowDown,
                 iconSize = KeyToolbarTokens.ArrowIconSize,
                 dimmed = true,
+                frostedGlass = frostedGlass,
             )
         else ->
             KeyButton(
@@ -414,6 +457,7 @@ internal fun RowScope.ToolbarPreviewSlot(
                 icon = action.icon,
                 iconSize = action.iconSize,
                 highlight = border,
+                frostedGlass = frostedGlass,
                 onTap = onClick,
             )
     }
@@ -447,6 +491,7 @@ private fun RowScope.KeyButton(
     accent: Color? = null,
     highlight: Color? = null,
     dimmed: Boolean = false,
+    frostedGlass: Boolean = true,
     // 注意参数顺序：onTap 必须是最后一个参数（调用处大量使用尾随 lambda），
     // 误放 onLongPress 在末尾会让尾随 lambda 绑到长按回调——单击失灵、方向键全废
     onLongPress: (() -> Unit)? = null,
@@ -481,12 +526,44 @@ private fun RowScope.KeyButton(
         } else {
             neutralCap
         }
-    val bg =
+    val solidBg =
         when {
             active -> lerp(accent ?: theme.cursor(), themeBg, KeyToolbarTokens.ACTIVE_SURFACE_BLEND)
             dimmed -> Color.Transparent
             isPressed -> lerp(baseCap, accent ?: themeFg, KeyToolbarTokens.PRESSED_SURFACE_BLEND)
             else -> baseCap
+        }
+    val bgBrush: Brush =
+        if (frostedGlass && !dimmed) {
+            when {
+                active -> {
+                    val activeBase = accent ?: theme.cursor()
+                    Brush.verticalGradient(
+                        listOf(
+                            activeBase.copy(alpha = KeyToolbarTokens.GLASS_ACTIVE_TOP_ALPHA),
+                            activeBase.copy(alpha = KeyToolbarTokens.GLASS_ACTIVE_BOTTOM_ALPHA),
+                        ),
+                    )
+                }
+                isPressed -> {
+                    val pressedCap = lerp(baseCap, accent ?: themeFg, KeyToolbarTokens.PRESSED_SURFACE_BLEND)
+                    Brush.verticalGradient(
+                        listOf(
+                            pressedCap.copy(alpha = KeyToolbarTokens.GLASS_PRESSED_TOP_ALPHA),
+                            pressedCap.copy(alpha = KeyToolbarTokens.GLASS_PRESSED_BOTTOM_ALPHA),
+                        ),
+                    )
+                }
+                else ->
+                    Brush.verticalGradient(
+                        listOf(
+                            baseCap.copy(alpha = KeyToolbarTokens.GLASS_SURFACE_TOP_ALPHA),
+                            baseCap.copy(alpha = KeyToolbarTokens.GLASS_SURFACE_BOTTOM_ALPHA),
+                        ),
+                    )
+            }
+        } else {
+            SolidColor(solidBg)
         }
     val tonedAccent =
         if (accent != null) {
@@ -506,14 +583,35 @@ private fun RowScope.KeyButton(
         } else {
             themeFg
         }
-    val borderColor =
+    val borderBrush: Brush =
         when {
-            highlight != null -> highlight
-            active -> (accent ?: theme.cursor())
-            dimmed -> borderTint.copy(alpha = KeyToolbarTokens.EMPTY_SLOT_BORDER_ALPHA)
-            isPressed -> borderTint.copy(alpha = KeyToolbarTokens.PRESSED_BORDER_ALPHA)
-            accent != null -> borderTint.copy(alpha = KeyToolbarTokens.ACCENT_BORDER_ALPHA)
-            else -> themeFg.copy(alpha = KeyToolbarTokens.NEUTRAL_BORDER_ALPHA)
+            highlight != null -> SolidColor(highlight)
+            active -> SolidColor(accent ?: theme.cursor())
+            dimmed -> SolidColor(borderTint.copy(alpha = KeyToolbarTokens.EMPTY_SLOT_BORDER_ALPHA))
+            frostedGlass -> {
+                val specularTop = lerp(borderTint, Color.White, KeyToolbarTokens.GLASS_SPECULAR_WHITE_BLEND)
+                val topAlpha =
+                    if (isPressed) {
+                        KeyToolbarTokens.GLASS_PRESSED_BORDER_TOP_ALPHA
+                    } else {
+                        KeyToolbarTokens.GLASS_BORDER_TOP_ALPHA
+                    }
+                val bottomAlpha =
+                    if (isPressed) {
+                        KeyToolbarTokens.GLASS_PRESSED_BORDER_BOTTOM_ALPHA
+                    } else {
+                        KeyToolbarTokens.GLASS_BORDER_BOTTOM_ALPHA
+                    }
+                Brush.verticalGradient(
+                    listOf(
+                        specularTop.copy(alpha = topAlpha),
+                        borderTint.copy(alpha = bottomAlpha),
+                    ),
+                )
+            }
+            isPressed -> SolidColor(borderTint.copy(alpha = KeyToolbarTokens.PRESSED_BORDER_ALPHA))
+            accent != null -> SolidColor(borderTint.copy(alpha = KeyToolbarTokens.ACCENT_BORDER_ALPHA))
+            else -> SolidColor(themeFg.copy(alpha = KeyToolbarTokens.NEUTRAL_BORDER_ALPHA))
         }
     val borderWidth = if (highlight != null) KeyToolbarTokens.SelectedBorder else Sizes.BorderThin
     val shape = RoundedCornerShape(KeyToolbarTokens.KeyCorner)
@@ -524,8 +622,8 @@ private fun RowScope.KeyButton(
             .widthIn(max = KeyToolbarTokens.KeyMaxWidth)
             .height(KeyToolbarTokens.KeyHeight)
             .clip(shape)
-            .background(bg)
-            .border(borderWidth, borderColor, shape)
+            .background(bgBrush)
+            .border(borderWidth, borderBrush, shape)
             .then(
                 if (repeat) {
                     Modifier.pointerInput(Unit) {

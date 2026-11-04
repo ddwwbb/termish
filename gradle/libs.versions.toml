@@ -24,6 +24,7 @@ robolectric = "4.16"
 sshj = "0.40.0"
 slf4j = "2.0.17"
 bouncycastle = "1.80.2"
+haze = "1.6.10"
 
 [libraries]
 androidx-compose-ui-test-junit4 = { module = "androidx.compose.ui:ui-test-junit4", version.ref = "androidx-compose-test" }
@@ -45,6 +46,7 @@ androidsvg = { module = "com.caverock:androidsvg-aar", version.ref = "androidsvg
 markdown-renderer = { module = "com.mikepenz:multiplatform-markdown-renderer", version.ref = "markdown-renderer" }
 markdown-renderer-code = { module = "com.mikepenz:multiplatform-markdown-renderer-code", version.ref = "markdown-renderer" }
 markdown-renderer-m3 = { module = "com.mikepenz:multiplatform-markdown-renderer-m3", version.ref = "markdown-renderer" }
+haze = { module = "dev.chrisbanes.haze:haze", version.ref = "haze" }
 junit = { module = "junit:junit", version.ref = "junit" }
 robolectric = { module = "org.robolectric:robolectric", version.ref = "robolectric" }
 

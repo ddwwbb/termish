@@ -143,6 +143,7 @@ class KeyToolbarLayoutTest {
     fun legacyAppSettingsJsonDeserializesToNullAndCustomRoundTrips() {
         val legacy = json.decodeFromString<AppSettings>("""{"theme":"DARK"}""")
         assertNull(legacy.keyToolbarLayout)
+        assertTrue(legacy.toolbarFrostedGlass)
 
         val customKey =
             ToolbarKeyConfig(
@@ -154,10 +155,12 @@ class KeyToolbarLayoutTest {
         val modified =
             AppSettings(
                 keyToolbarLayout = KeyToolbarLayout.DEFAULT.update(ToolbarPos(3, 6), customKey),
+                toolbarFrostedGlass = false,
             )
         val encoded = json.encodeToString(modified)
         val decoded = json.decodeFromString<AppSettings>(encoded)
         assertEquals(customKey, decoded.keyToolbarLayout?.get(ToolbarPos(3, 6)))
+        assertEquals(false, decoded.toolbarFrostedGlass)
     }
 
     @Test

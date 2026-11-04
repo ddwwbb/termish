@@ -336,6 +336,8 @@ fun SettingsScreen(
         SettingsKeyToolbarScreen(
             layout = settings.keyToolbarLayout,
             theme = TerminalThemes.ALL.getOrElse(terminalThemeIndex) { TerminalThemes.ALL[0] },
+            frostedGlass = settings.toolbarFrostedGlass,
+            onChangeFrostedGlass = { enabled -> onChange(settings.copy(toolbarFrostedGlass = enabled)) },
             onChangeLayout = { updated -> onChange(settings.copy(keyToolbarLayout = updated)) },
             onBack = { onOpenSub(null) },
         )

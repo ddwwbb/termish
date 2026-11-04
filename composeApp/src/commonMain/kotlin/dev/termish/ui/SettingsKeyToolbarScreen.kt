@@ -33,6 +33,7 @@ import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
+import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
@@ -129,6 +130,8 @@ internal val BUILTIN_ACTIONS_BY_CATEGORY: List<Pair<KeyCategory, List<ToolbarAct
 fun SettingsKeyToolbarScreen(
     layout: KeyToolbarLayout?,
     theme: TerminalTheme,
+    frostedGlass: Boolean = true,
+    onChangeFrostedGlass: (Boolean) -> Unit = {},
     onChangeLayout: (KeyToolbarLayout?) -> Unit,
     onBack: () -> Unit,
 ) {
@@ -194,6 +197,7 @@ fun SettingsKeyToolbarScreen(
                 layout = current,
                 selectedPos = selectedPos,
                 theme = theme,
+                frostedGlass = frostedGlass,
                 onSelect = { selectedPos = it },
                 onSwap = { from, to ->
                     commit(current.swap(from, to))
@@ -263,6 +267,46 @@ fun SettingsKeyToolbarScreen(
                             Text(kts.actionClear)
                         }
                     }
+                }
+            }
+
+            Spacer(Modifier.height(Spacing.Md))
+
+            // 毛玻璃效果开关
+            Card(
+                Modifier.fillMaxWidth(),
+                shape = RoundedCornerShape(Corners.Md),
+                colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
+                elevation = CardDefaults.cardElevation(defaultElevation = Spacing.None),
+                border =
+                    BorderStroke(
+                        Sizes.BorderThin,
+                        MaterialTheme.colorScheme.onSurface.copy(alpha = KeyToolbarTokens.CARD_BORDER_ALPHA),
+                    ),
+            ) {
+                Row(
+                    Modifier
+                        .fillMaxWidth()
+                        .padding(horizontal = Spacing.Lg, vertical = Spacing.Md),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(Spacing.Md),
+                ) {
+                    Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(Spacing.Xs)) {
+                        Text(
+                            kts.frostedGlassTitle,
+                            style = MaterialTheme.typography.bodyMedium,
+                            color = MaterialTheme.colorScheme.onSurface,
+                        )
+                        Text(
+                            kts.frostedGlassSubtitle,
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurface.copy(alpha = KeyToolbarTokens.SUBTITLE_ALPHA),
+                        )
+                    }
+                    Switch(
+                        checked = frostedGlass,
+                        onCheckedChange = onChangeFrostedGlass,
+                    )
                 }
             }
 

@@ -107,6 +107,11 @@ import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.IntSize
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.zIndex
+import dev.chrisbanes.haze.HazeStyle
+import dev.chrisbanes.haze.HazeTint
+import dev.chrisbanes.haze.hazeEffect
+import dev.chrisbanes.haze.hazeSource
+import dev.chrisbanes.haze.rememberHazeState
 import dev.termish.data.AppSettings
 import dev.termish.data.Host
 import dev.termish.data.HostRepository
@@ -120,6 +125,7 @@ import dev.termish.ssh.SftpSession
 import dev.termish.term.argbToRgb
 import dev.termish.ui.PIP_DEFAULT_H
 import dev.termish.ui.PIP_DEFAULT_W
+import dev.termish.ui.theme.KeyToolbarTokens
 import dev.termish.ui.theme.Sizes
 import dev.termish.ui.theme.Spacing
 import dev.termish.ui.theme.StatusColors
@@ -944,6 +950,7 @@ private fun TerminalBody(
                     with(density) { 12.dp.toPx() } +
                     // 展开行 3/4 的覆盖高度（展开时 >0；仅键盘弹起时平移生效）
                     (toolbarHeightPx - toolbarBaseHeightPx)
+            val toolbarHazeState = rememberHazeState(blurEnabled = settings.toolbarFrostedGlass)
             // 画布四周留出小间距，文字不贴屏幕边缘；行列按内缩后宽度自动重算
             Box(
                 Modifier
@@ -952,66 +959,74 @@ private fun TerminalBody(
                     .background(theme.background())
                     .onSizeChanged { canvasSize = it },
             ) {
-                when {
-                    controller.herdrNeedsInstall || controller.herdrInstalling -> {
-                        // 底部让出工具栏高度：卡片在「画布−工具栏」区域内居中，视觉重心不上偏
-                        HerdrInstallGuide(controller, with(density) { (toolbarHeightPx + navBarsBottomPx).toDp() })
-                    }
-                    controller.moshNeedsInstall || controller.moshInstalling -> {
-                        MoshInstallGuide(controller, with(density) { (toolbarHeightPx + navBarsBottomPx).toDp() })
-                    }
-                    // 屏幕推流服务缺失：终端画布中央显示安装引导（小窗同步显示
-                    // 提示；打开屏幕即可见，无需先进全屏——v1.6.0 用户反馈）
-                    screenPip?.serviceMissing == true -> {
-                        ScreenServiceGuide(
-                            installing = screenPip.installing,
-                            installLog = screenPip.installLog,
-                            ffmpegMissing = screenPip.ffmpegMissing,
-                            needsUpgrade = screenPip.relayNeedsUpgrade,
-                            needsSudoPassword = screenPip.needsSudoPassword,
-                            onInstall = { password -> onInstallScreenService(controller.host, password) },
-                            modifier =
-                                Modifier.padding(
-                                    bottom = with(density) { (toolbarHeightPx + navBarsBottomPx).toDp() },
-                                ),
-                        )
-                    }
-                    else -> {
-                        TerminalView(
-                            controller = controller,
-                            theme = theme,
-                            fontSizeSp = settings.terminalFontSize.toFloat(),
-                            targetCols = settings.terminalTargetCols,
-                            coveredBottomPx = coveredBottomPx,
-                            keyboardVisible = imeVisible,
-                            onRequestKeyboard = showKeyboard,
-                            onReady = { cols, rows ->
-                                // 等工具栏高度量到后（sizeStable）建连：画布尺寸已扣除工具栏区域，
-                                // 避免先用"含被盖住区域"的错误行数起 PTY
-                                if (!connectSent && toolbarBaseHeightPx > 0f) {
-                                    connectSent = true
-                                    controller.connect(cols, rows)
-                                }
-                            },
-                            // 首帧工具栏未量到时画布偏高是中间尺寸：跳过 resize/onReady，
-                            // 避免错误行数起 PTY 后再 resize（TUI 整体重排跳动）
-                            sizeStable = toolbarBaseHeightPx > 0f,
-                            modifier =
-                                Modifier
-                                    .fillMaxSize()
-                                    .padding(horizontal = 6.dp, vertical = 4.dp)
-                                    // 只让出常驻两行高度：展开行 3/4 覆盖画布（不压缩、
-                                    // 不 resize、不重排），展开收起零闪屏。
-                                    // 让位补导航条：工具栏被 navigationBarsPadding 抬高，
-                                    // 不补则终端底行被工具栏盖住（见 navBarsBottomPx）
-                                    .padding(
-                                        bottom =
-                                            with(density) {
-                                                (toolbarBaseHeightPx + navBarsBottomPx).toDp() +
-                                                    12.dp
-                                            },
+                // 单独包裹终端画布作为毛玻璃采样源（与下方悬浮工具栏同级，避免自引用）
+                Box(
+                    Modifier
+                        .fillMaxSize()
+                        .background(theme.background())
+                        .hazeSource(toolbarHazeState),
+                ) {
+                    when {
+                        controller.herdrNeedsInstall || controller.herdrInstalling -> {
+                            // 底部让出工具栏高度：卡片在「画布−工具栏」区域内居中，视觉重心不上偏
+                            HerdrInstallGuide(controller, with(density) { (toolbarHeightPx + navBarsBottomPx).toDp() })
+                        }
+                        controller.moshNeedsInstall || controller.moshInstalling -> {
+                            MoshInstallGuide(controller, with(density) { (toolbarHeightPx + navBarsBottomPx).toDp() })
+                        }
+                        // 屏幕推流服务缺失：终端画布中央显示安装引导（小窗同步显示
+                        // 提示；打开屏幕即可见，无需先进全屏——v1.6.0 用户反馈）
+                        screenPip?.serviceMissing == true -> {
+                            ScreenServiceGuide(
+                                installing = screenPip.installing,
+                                installLog = screenPip.installLog,
+                                ffmpegMissing = screenPip.ffmpegMissing,
+                                needsUpgrade = screenPip.relayNeedsUpgrade,
+                                needsSudoPassword = screenPip.needsSudoPassword,
+                                onInstall = { password -> onInstallScreenService(controller.host, password) },
+                                modifier =
+                                    Modifier.padding(
+                                        bottom = with(density) { (toolbarHeightPx + navBarsBottomPx).toDp() },
                                     ),
-                        )
+                            )
+                        }
+                        else -> {
+                            TerminalView(
+                                controller = controller,
+                                theme = theme,
+                                fontSizeSp = settings.terminalFontSize.toFloat(),
+                                targetCols = settings.terminalTargetCols,
+                                coveredBottomPx = coveredBottomPx,
+                                keyboardVisible = imeVisible,
+                                onRequestKeyboard = showKeyboard,
+                                onReady = { cols, rows ->
+                                    // 等工具栏高度量到后（sizeStable）建连：画布尺寸已扣除工具栏区域，
+                                    // 避免先用"含被盖住区域"的错误行数起 PTY
+                                    if (!connectSent && toolbarBaseHeightPx > 0f) {
+                                        connectSent = true
+                                        controller.connect(cols, rows)
+                                    }
+                                },
+                                // 首帧工具栏未量到时画布偏高是中间尺寸：跳过 resize/onReady，
+                                // 避免错误行数起 PTY 后再 resize（TUI 整体重排跳动）
+                                sizeStable = toolbarBaseHeightPx > 0f,
+                                modifier =
+                                    Modifier
+                                        .fillMaxSize()
+                                        .padding(horizontal = 6.dp, vertical = 4.dp)
+                                        // 只让出常驻两行高度：展开行 3/4 覆盖画布（不压缩、
+                                        // 不 resize、不重排），展开收起零闪屏。
+                                        // 让位补导航条：工具栏被 navigationBarsPadding 抬高，
+                                        // 不补则终端底行被工具栏盖住（见 navBarsBottomPx）
+                                        .padding(
+                                            bottom =
+                                                with(density) {
+                                                    (toolbarBaseHeightPx + navBarsBottomPx).toDp() +
+                                                        12.dp
+                                                },
+                                        ),
+                            )
+                        }
                     }
                 }
 
@@ -1410,22 +1425,42 @@ private fun TerminalBody(
                     )
                 }
 
-                // 底部悬浮键盘工具栏：不透明背景 + 顶部分隔线，与系统键盘/终端内容拉开层次。
+                // 底部悬浮键盘工具栏：毛玻璃模糊背景（或实心背景）+ 顶部分隔线，与系统键盘/终端内容拉开层次。
                 // 外层负责避让导航条/键盘；内层单独测内容高度（padding 会算进
                 // 外层总高，直接测外层会把键盘高度重复计入平移量）。
                 Column(
                     Modifier
                         .align(Alignment.BottomCenter)
                         .fillMaxWidth()
-                        .background(theme.background())
-                        .navigationBarsPadding()
+                        .then(
+                            if (settings.toolbarFrostedGlass) {
+                                Modifier.hazeEffect(
+                                    state = toolbarHazeState,
+                                    style =
+                                        HazeStyle(
+                                            backgroundColor = theme.background(),
+                                            tint =
+                                                HazeTint(
+                                                    theme.background().copy(alpha = KeyToolbarTokens.PANEL_TINT_ALPHA),
+                                                ),
+                                            blurRadius = KeyToolbarTokens.BlurRadius,
+                                            fallbackTint =
+                                                HazeTint(
+                                                    theme.background().copy(alpha = KeyToolbarTokens.PANEL_FALLBACK_ALPHA),
+                                                ),
+                                        ),
+                                )
+                            } else {
+                                Modifier.background(theme.background())
+                            },
+                        ).navigationBarsPadding()
                         .imePadding()
                         // 测整体遮盖高度（含 padding；键盘弹起时工具栏随 imePadding
                         // 上移，遮盖高度随之增大，指示器居中区自动收缩到键盘之上）
                         .onSizeChanged { toolbarOverlayPx = it.height.toFloat() },
                 ) {
                     Column(Modifier.onSizeChanged { toolbarHeightPx = it.height.toFloat() }) {
-                        HorizontalDivider(color = theme.foreground().copy(alpha = 0.2f))
+                        HorizontalDivider(color = theme.foreground().copy(alpha = KeyToolbarTokens.PANEL_TOP_DIVIDER_ALPHA))
                         Spacer(Modifier.height(6.dp))
                         // 键盘工具栏常驻：手机系统键盘无 CTRL/ESC/方向键，关掉终端不可用
                         KeyToolbar(
@@ -1438,6 +1473,7 @@ private fun TerminalBody(
                             // 回报高度必须含 KeyToolbar 全部自身 padding（含底部 10dp）
                             // ——画布按它让位，缺了哪层 padding 就会「害羞」地盖住终端底行
                             onBaseHeightChanged = { toolbarBaseHeightPx = it.toFloat() },
+                            frostedGlass = settings.toolbarFrostedGlass,
                             onKey = { key ->
                                 if (settings.hapticFeedback) hapticTick()
                                 controller.sendSpecialKey(key)

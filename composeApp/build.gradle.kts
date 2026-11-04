@@ -103,6 +103,7 @@ kotlin {
             implementation(libs.markdown.renderer)
             implementation(libs.markdown.renderer.code)
             implementation(libs.markdown.renderer.m3)
+            implementation(libs.haze)
         }
 
         androidMain.dependencies {

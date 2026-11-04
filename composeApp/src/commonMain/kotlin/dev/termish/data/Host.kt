@@ -123,6 +123,8 @@ data class AppSettings(
     val asrResourceId: String = "",
     /** 终端快捷键栏自定义布局；null = 使用 [KeyToolbarLayout.DEFAULT]（恢复默认即写回 null）。 */
     val keyToolbarLayout: KeyToolbarLayout? = null,
+    /** 终端快捷键工具栏是否启用毛玻璃效果（默认开启；Android 12+ 与 iOS 生效，更低版本降级为半透明遮罩）。 */
+    val toolbarFrostedGlass: Boolean = true,
 )
 
 /** 每台主机独立保存的 Agent 工作区偏好，避免污染全局终端设置。 */

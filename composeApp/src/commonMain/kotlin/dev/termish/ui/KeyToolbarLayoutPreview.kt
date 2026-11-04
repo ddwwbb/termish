@@ -52,6 +52,7 @@ internal fun KeyToolbarLayoutPreview(
     layout: KeyToolbarLayout,
     selectedPos: ToolbarPos,
     theme: TerminalTheme,
+    frostedGlass: Boolean = true,
     onSelect: (ToolbarPos) -> Unit,
     onSwap: (ToolbarPos, ToolbarPos) -> Unit,
 ) {
@@ -141,6 +142,7 @@ internal fun KeyToolbarLayoutPreview(
                                     theme = theme,
                                     selected = if (draggedPos == null) pos == selectedPos else pos == targetPos,
                                     highlight = highlight,
+                                    frostedGlass = frostedGlass,
                                     onClick = { if (KeyToolbarLayout.isEditable(pos)) onSelect(pos) },
                                 )
                             }
@@ -166,6 +168,7 @@ internal fun KeyToolbarLayoutPreview(
                     theme = theme,
                     selected = true,
                     highlight = highlight,
+                    frostedGlass = frostedGlass,
                     onClick = {},
                 )
             }
